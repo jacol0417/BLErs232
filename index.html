@@ -1,1 +1,310 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>空調系統重置 - WebApp 測試版</title>
+    <style>
+        /* 基礎樣式設定，模擬黑底工控風格 */
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #121212;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 頂部綠色標題 */
+        .header {
+            background-color: #004d40;
+            color: #ffffff;
+            text-align: center;
+            padding: 12px 0;
+            font-size: 20px;
+            font-weight: bold;
+            letter-spacing: 2px;
+        }
+
+        /* 藍色控制面板 */
+        .control-panel {
+            background-color: #0d47a1;
+            margin: 12px;
+            padding: 14px;
+            border-radius: 8px;
+        }
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            color: #ff5252;
+            font-weight: bold;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+        .config-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #69f0ae;
+            font-size: 14px;
+            margin-bottom: 12px;
+        }
+        .input-group {
+            display: flex;
+            gap: 8px;
+        }
+        .input-group input {
+            flex: 1;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid #546e7a;
+            color: #ffffff;
+            padding: 6px 4px;
+            font-size: 16px;
+            outline: none;
+        }
+        .input-group input::placeholder { color: #b0bec5; }
+        .input-group button {
+            background: transparent;
+            border: none;
+            color: #ffffff;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 6px 12px;
+        }
+
+        /* 核心優化：獨立解析出來的功能選單區（固定在中央偏上，不跟隨 Log 滾動） */
+        .menu-section {
+            padding: 0 12px;
+            margin-bottom: 8px;
+        }
+        .menu-title {
+            color: #aaaaaa;
+            font-size: 14px;
+            margin-bottom: 6px;
+        }
+        /* 寬度隔離，啟用 GPU 加速渲染 */
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+            max-height: 180px;
+            overflow-y: auto;
+            contain: content; 
+        }
+        .menu-grid button {
+            background-color: #1e1e1e;
+            color: #69f0ae;
+            border: 1px solid #333333;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: left;
+            font-size: 13px;
+            font-family: monospace;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .menu-grid button:active {
+            background-color: #333333;
+        }
+
+        /* 接收控制台（終端機綠字區） */
+        .console-section {
+            flex: 1;
+            margin: 0 12px 12px 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .console-title {
+            color: #aaaaaa;
+            font-size: 14px;
+            margin-bottom: 4px;
+        }
+        .terminal {
+            flex: 1;
+            background-color: #000000;
+            border: 1px solid #222222;
+            padding: 8px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #00ff00;
+            line-height: 1.4;
+            overflow-y: scroll;
+            white-space: pre-wrap;
+            word-break: break-all;
+            /* 最佳化 iOS 滾動流暢度 */
+            -webkit-overflow-scrolling: touch; 
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">空調系統重置</div>
+
+    <div class="control-panel">
+        <div class="status-row">
+            <span>線材識別：藍牙 RS232 模式</span>
+            <span id="conn-status" style="color: #69f0ae;">[已連線]</span>
+        </div>
+        <div class="config-row">
+            <span>57600</span>
+            <span>編碼: ASCII</span>
+            <button style="background:transparent; border:none; color:#fff; cursor:pointer;" onclick="simulateIncomingData()">模擬硬體連發</button>
+        </div>
+        <div class="input-group">
+            <input type="text" id="cmd-input" placeholder="請輸入指令">
+            <button onclick="sendManualCmd()">傳送</button>
+        </div>
+    </div>
+
+    <div class="menu-section">
+        <div class="menu-title">功能選單 (解析自硬體訊號，點擊即傳送)</div>
+        <div class="menu-grid" id="ui-menu-grid">
+            <div style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">等待硬體回傳選單... (或點擊模擬按鈕)</div>
+        </div>
+    </div>
+
+    <div class="console-section">
+        <div class="console-title">接收控制台 (原始資料流)</div>
+        <div class="terminal" id="terminal-box"></div>
+    </div>
+
+    <script>
+        const terminalBox = document.getElementById('terminal-box');
+        const menuGrid = document.getElementById('ui-menu-grid');
+        
+        let menuRawLines = [];
+        let isMenuParsed = false;
+        let maxLogLines = 200; // 限制控制台最大行數，防止 iOS 記憶體當機
+
+        // ==========================================
+        // 核心：資料過濾路由器 (Data Router)
+        // ==========================================
+        function processIncomingLine(line) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine) return;
+
+            // 1. 印出原始資料到綠色控制台
+            appendLogToTerminal(line);
+
+            // 2. 判斷是否為功能選單特徵：例如以括號數字開頭 "(1) Status Screen" 或 "1. Status"
+            const isMenuPattern = /^\(\d+\)|^\d+\./.test(trimmedLine);
+
+            if (isMenuPattern) {
+                // 如果偵測到選單項目，且尚未解析鎖定，就加入快取
+                if (!isMenuParsed) {
+                    if (!menuRawLines.includes(trimmedLine)) {
+                        menuRawLines.push(trimmedLine);
+                    }
+                    
+                    // 防彈機制：延遲 200ms 等待選單文字全部收齊後一次性渲染
+                    clearTimeout(window.menuRenderTimer);
+                    window.menuRenderTimer = setTimeout(() => {
+                        renderUiMenu(menuRawLines);
+                        isMenuParsed = true; // 鎖定選單，接下來不重複刷新選單 UI
+                    }, 200);
+                }
+            }
+        }
+
+        // 將文字渲染成好點擊的網頁按鈕
+        function renderUiMenu(lines) {
+            menuGrid.innerHTML = ''; // 清空提示
+            lines.forEach(line => {
+                // 提取出指令數字，例如從 "(1) Status Screen" 提取出 "1"
+                const match = line.match(/\d+/);
+                const cmdNumber = match ? match[0] : '';
+
+                const btn = document.createElement('button');
+                btn.innerText = line;
+                btn.onclick = () => {
+                    executeCommand(cmdNumber, line);
+                };
+                menuGrid.appendChild(btn);
+            });
+        }
+
+        // 處理輸出（將指令傳給硬體）
+        function executeCommand(cmdNum, fullText) {
+            appendLogToTerminal(`\n[WebApp 發送指令]: ${cmdNum}\n`);
+            alert(`已向 RS232 發送指令: ${cmdNum} (${fullText})`);
+            
+            // 在您的 Capacitor 實際專案中，這裡會是：
+            // BluetoothSerialPlugin.write({ value: cmdNum + "\r\n" });
+        }
+
+        function sendManualCmd() {
+            const input = document.getElementById('cmd-input');
+            if(input.value) {
+                executeCommand(input.value, '手動輸入');
+                input.value = '';
+            }
+        }
+
+        // 控制台顯示與即時修剪（防止塞爆）
+        function appendLogToTerminal(text) {
+            const p = document.createElement('div');
+            p.innerText = text;
+            terminalBox.appendChild(p);
+
+            // 如果行數大於設定值，刪除最舊的
+            if (terminalBox.children.length > maxLogLines) {
+                terminalBox.removeChild(terminalBox.firstChild);
+            }
+
+            // 自動滾動到底部
+            terminalBox.scrollTop = terminalBox.scrollHeight;
+        }
+
+        // ==========================================
+        // 模擬測試數據（模擬您的真實硬體行為）
+        // ==========================================
+        function simulateIncomingData() {
+            // 重置狀態
+            isMenuParsed = false;
+            menuRawLines = [];
+            terminalBox.innerHTML = '';
+            
+            appendLogToTerminal("--- 開始接收設備資料流 ---");
+
+            // 1. 模擬每 300 毫秒噴發一次時間戳記 (持續不斷)
+            let timeTicker = setInterval(() => {
+                const now = new Date();
+                const timestamp = `[${now.toLocaleTimeString()}.${String(now.getMilliseconds()).padStart(3, '0')}] SYSTEM_RUNNING...`;
+                processIncomingLine(timestamp);
+            }, 300);
+
+            // 2. 模擬 1.5 秒後，使用者點擊了發送空白，硬體吐出選單字串 (但時間戳記依然在噴發)
+            setTimeout(() => {
+                appendLogToTerminal("\n-------------------------------------------");
+                processIncomingLine("USER LEVEL ACCESS");
+                processIncomingLine("(1)  Status Screen");
+                processIncomingLine("(2)  Digital Inputs Monitor");
+                processIncomingLine("(3)  Digital Outputs Monitor");
+                processIncomingLine("(4)  Analogue I/O Monitor");
+                processIncomingLine("(5)  Communications Monitor");
+                processIncomingLine("(6)  Test Functions");
+                processIncomingLine("(7)  Reset Alarms & Test Functions");
+                processIncomingLine("(8)  Download Event Log");
+                processIncomingLine("(9)  Download Data Log");
+                processIncomingLine("(10) Dwnload Test Log");
+                processIncomingLine("(11) Change Access Level");
+                appendLogToTerminal("-------------------------------------------\n");
+            }, 1500);
+
+            // 測試運行 15 秒後自動停止模擬，防止瀏覽器背景跑不停
+            setTimeout(() => {
+                clearInterval(timeTicker);
+                appendLogToTerminal("\n--- 模擬結束 ---");
+            }, 15000);
+        }
+    </script>
+</body>
+</html>
 
