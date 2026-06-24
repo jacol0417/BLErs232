@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>空調系統重置 - WebApp 優化版</title>
+    <title>空調系統重置 - 真實連線狀態版</title>
     <style>
         body {
             margin: 0;
@@ -37,25 +37,35 @@
         .status-row {
             display: flex;
             justify-content: space-between;
-            color: #ff5252;
+            align-items: center;
             font-weight: bold;
             margin-bottom: 16px;
             font-size: 14px;
         }
-        /* 狀態文字改為可點擊的按鈕樣式 */
+        
+        /* 狀態按鈕：預設未連線（紅色） */
         .status-btn {
             background: transparent;
-            border: 1px solid #69f0ae;
-            color: #69f0ae;
-            padding: 2px 8px;
+            border: 1px solid #ff5252;
+            color: #ff5252;
+            padding: 4px 10px;
             border-radius: 4px;
             cursor: pointer;
             font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s ease;
         }
-        .status-btn:active {
-            background-color: rgba(105, 240, 174, 0.2);
+        /* 連線成功後的樣式（綠色） */
+        .status-btn.connected {
+            border-color: #69f0ae;
+            color: #69f0ae;
         }
-        
+        /* 連線中狀態（黃色） */
+        .status-btn.connecting {
+            border-color: #ffd740;
+            color: #ffd740;
+        }
+
         .config-row {
             display: flex;
             justify-content: flex-start;
@@ -64,7 +74,6 @@
             font-size: 14px;
             margin-bottom: 16px;
         }
-        /* 編碼切換按鈕樣式 */
         .encode-toggle {
             background: rgba(255,255,255,0.1);
             border: 1px solid #69f0ae;
@@ -89,6 +98,10 @@
             font-size: 16px;
             outline: none;
         }
+        .input-group input:disabled {
+            border-bottom: 2px solid #37474f;
+            color: #555555;
+        }
         .input-group input::placeholder { color: #b0bec5; }
         .input-group button {
             background: transparent;
@@ -97,6 +110,10 @@
             font-size: 16px;
             cursor: pointer;
             padding: 6px 12px;
+        }
+        .input-group button:disabled {
+            color: #555555;
+            cursor: not-allowed;
         }
 
         /* 功能選單區 */
@@ -131,9 +148,7 @@
             overflow: hidden;
             text-overflow: ellipsis;
         }
-        .menu-grid button:active {
-            background-color: #333333;
-        }
+        .menu-grid button:active { background-color: #333333; }
 
         /* 接收控制台 */
         .console-section {
@@ -170,22 +185,22 @@
 
     <div class="control-panel">
         <div class="status-row">
-            <span>線材識別：藍牙 RS232 模式</span>
-            <button class="status-btn" id="conn-status" onclick="simulateIncomingData()">[已連線]</button>
+            <span id="hardware-id">線材識別：等待藍牙序列埠連線...</span>
+            <button class="status-btn" id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
         </div>
         <div class="config-row">
             <span>編碼：<button class="encode-toggle" id="encode-btn" onclick="toggleEncoding()">ASCII</button></span>
         </div>
         <div class="input-group">
-            <input type="text" id="cmd-input" placeholder="請輸入指令">
-            <button onclick="sendManualCmd()">傳送</button>
+            <input type="text" id="cmd-input" placeholder="請先連接硬體設備..." disabled>
+            <button id="send-btn" onclick="sendManualCmd()" disabled>傳送</button>
         </div>
     </div>
 
     <div class="menu-section">
         <div class="menu-title">功能選單 (解析自硬體訊號，點擊即傳送)</div>
         <div class="menu-grid" id="ui-menu-grid">
-            <div style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">等待硬體回傳選單... (或點擊右上角連線狀態模擬)</div>
+            <div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先點擊右上角狀態按鈕建立藍牙連接...</div>
         </div>
     </div>
 
@@ -199,23 +214,105 @@
         const menuGrid = document.getElementById('ui-menu-grid');
         const encodeBtn = document.getElementById('encode-btn');
         const connStatus = document.getElementById('conn-status');
+        const hardwareId = document.getElementById('hardware-id');
+        const cmdInput = document.getElementById('cmd-input');
+        const sendBtn = document.getElementById('send-btn');
+        const menuPlaceholder = document.getElementById('menu-placeholder');
         
         let menuRawLines = [];
         let isMenuParsed = false;
         let maxLogLines = 200; 
         let currentEncoding = 'ASCII';
+        let isConnected = false; // 真實連線狀態旗標
+        let timeTicker = null;
 
-        // 編碼切換邏輯 (ASCII <-> BIG5)
-        function toggleEncoding() {
-            if (currentEncoding === 'ASCII') {
-                currentEncoding = 'BIG5';
+        // 主連線按鈕點擊處理
+        function handleConnectionClick() {
+            if (!isConnected) {
+                // 執行連線流程
+                startConnectionProcess();
             } else {
-                currentEncoding = 'ASCII';
+                // 執行斷線流程
+                disconnectProcess();
             }
-            encodeBtn.innerText = currentEncoding;
-            appendLogToTerminal(`\n[系統通知]: 已切換文字解碼格式為 ${currentEncoding}\n`);
+        }
+
+        // 模擬藍牙連線與交握
+        function startConnectionProcess() {
+            // 1. 進入「連線中」狀態
+            connStatus.innerText = "[連線中...]";
+            connStatus.className = "status-btn connecting";
+            hardwareId.innerText = "線材識別：正在搜尋藍牙序列埠...";
+            appendLogToTerminal("[系統]: 開始搜尋周邊藍牙 RS232 轉接器...");
+
+            // 2. 模擬 1.5 秒後藍牙成功配對（交握確認）
+            setTimeout(() => {
+                isConnected = true;
+                connStatus.innerText = "[已連線]";
+                connStatus.className = "status-btn connected";
+                hardwareId.innerText = "線材識別：藍牙 RS232 模式 (BT-Serial_v2)";
+                appendLogToTerminal("[系統]: 藍牙配對成功！已與 RS232 晶片建立通道 (BaudRate: 57600)。");
+                
+                // 解鎖輸入框與傳送按鈕
+                cmdInput.disabled = false;
+                cmdInput.placeholder = "請輸入指令";
+                sendBtn.disabled = false;
+                menuPlaceholder.innerText = "已連線，等待硬體回傳選單數據...";
+
+                // 3. 連線確認成功後，設備才正式開始源源不絕傳送資料
+                startHardwareStream();
+            }, 1500);
+        }
+
+        // 斷開連線
+        function disconnectProcess() {
+            clearInterval(timeTicker);
+            isConnected = false;
+            isMenuParsed = false;
+            menuRawLines = [];
             
-            // 實際專案中，這裡會去改變藍牙數據流的 TextDecoder('big5' 或 'ascii')
+            // 恢復初始 UI
+            connStatus.innerText = "[未連線]";
+            connStatus.className = "status-btn";
+            hardwareId.innerText = "線材識別：等待藍牙序列埠連線...";
+            cmdInput.disabled = true;
+            cmdInput.value = "";
+            cmdInput.placeholder = "請先連接硬體設備...";
+            sendBtn.disabled = true;
+            
+            menuGrid.innerHTML = '<div style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先點擊右上角狀態按鈕建立藍牙連接...</div>';
+            appendLogToTerminal("\n[系統]: 藍牙連線已中斷。\n");
+        }
+
+        // 設備資料串流開始
+        function startHardwareStream() {
+            appendLogToTerminal("--- 開始接收設備資料流 ---");
+
+            // 每 300 毫秒噴發一次時間戳記
+            timeTicker = setInterval(() => {
+                const now = new Date();
+                const timestamp = `[${now.toLocaleTimeString()}.${String(now.getMilliseconds()).padStart(3, '0')}] SYSTEM_RUNNING...`;
+                processIncomingLine(timestamp);
+            }, 300);
+
+            // 1 秒後硬體吐出選單字串
+            setTimeout(() => {
+                if(!isConnected) return; // 預防在等待期就被使用者點斷線
+                appendLogToTerminal("\n-------------------------------------------");
+                processIncomingLine("USER LEVEL ACCESS");
+                processIncomingLine("(1)  Status Screen");
+                processIncomingLine("(2)  Digital Inputs Monitor");
+                processIncomingLine("(3)  Digital Outputs Monitor");
+                processIncomingLine("(4)  Analogue I/O Monitor");
+                processIncomingLine("(5)  Communications Monitor");
+                processIncomingLine("(6)  Test Functions");
+                processIncomingLine("(7)  Reset Alarms & Test Functions");
+                processIncomingLine("(8)  Download Event Log");
+                processIncomingLine("(9)  Download Data Log");
+                processIncomingLine("(10) Dwnload Test Log");
+                processIncomingLine("(11) Change Access Level");
+                appendLogToTerminal("-------------------------------------------\n");
+            }, 1000);
         }
 
         // 資料過濾路由器 (Data Router)
@@ -258,13 +355,14 @@
         }
 
         function executeCommand(cmdNum, fullText) {
+            if(!isConnected) return;
             appendLogToTerminal(`\n[WebApp 發送指令]: ${cmdNum}\n`);
             alert(`已依據編碼 [${currentEncoding}] 向隨附裝置發送指令: ${cmdNum}`);
         }
 
         function sendManualCmd() {
             const input = document.getElementById('cmd-input');
-            if(input.value) {
+            if(input.value && isConnected) {
                 executeCommand(input.value, '手動輸入');
                 input.value = '';
             }
@@ -281,46 +379,15 @@
             terminalBox.scrollTop = terminalBox.scrollHeight;
         }
 
-        // 模擬數據
-        function simulateIncomingData() {
-            isMenuParsed = false;
-            menuRawLines = [];
-            terminalBox.innerHTML = '';
-            
-            // 模擬點擊時的連線狀態變化
-            connStatus.innerText = "[接收中...]";
-            appendLogToTerminal("--- 開始接收設備資料流 ---");
-
-            let timeTicker = setInterval(() => {
-                const now = new Date();
-                const timestamp = `[${now.toLocaleTimeString()}.${String(now.getMilliseconds()).padStart(3, '0')}] SYSTEM_RUNNING...`;
-                processIncomingLine(timestamp);
-            }, 300);
-
-            setTimeout(() => {
-                appendLogToTerminal("\n-------------------------------------------");
-                processIncomingLine("USER LEVEL ACCESS");
-                processIncomingLine("(1)  Status Screen");
-                processIncomingLine("(2)  Digital Inputs Monitor");
-                processIncomingLine("(3)  Digital Outputs Monitor");
-                processIncomingLine("(4)  Analogue I/O Monitor");
-                processIncomingLine("(5)  Communications Monitor");
-                processIncomingLine("(6)  Test Functions");
-                processIncomingLine("(7)  Reset Alarms & Test Functions");
-                processIncomingLine("(8)  Download Event Log");
-                processIncomingLine("(9)  Download Data Log");
-                processIncomingLine("(10) Dwnload Test Log");
-                processIncomingLine("(11) Change Access Level");
-                appendLogToTerminal("-------------------------------------------\n");
-            }, 1500);
-
-            setTimeout(() => {
-                clearInterval(timeTicker);
-                appendLogToTerminal("\n--- 模擬結束 ---");
-                connStatus.innerText = "[已連線]";
-            }, 15000);
+        function toggleEncoding() {
+            if (currentEncoding === 'ASCII') {
+                currentEncoding = 'BIG5';
+            } else {
+                currentEncoding = 'ASCII';
+            }
+            encodeBtn.innerText = currentEncoding;
+            appendLogToTerminal(`\n[系統通知]: 已切換文字解碼格式為 ${currentEncoding}\n`);
         }
     </script>
 </body>
 </html>
-
