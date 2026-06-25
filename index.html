@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>空調系統重置 - 真實藍牙生產版</title>
+    <title>空調系統重置 - 終極調試版</title>
     <style>
         body {
             margin: 0; padding: 0; background-color: #121212; color: #ffffff;
@@ -11,30 +11,45 @@
             display: flex; flex-direction: column; height: 100vh; overflow: hidden;
         }
         .header { background-color: #004d40; color: #ffffff; text-align: center; padding: 12px 0; font-size: 20px; font-weight: bold; letter-spacing: 2px; }
+        
+        /* 藍色控制面板 */
         .control-panel { background-color: #0d47a1; margin: 12px; padding: 14px; border-radius: 8px; }
-        .status-row { display: flex; justify-content: space-between; align-items: center; font-weight: bold; margin-bottom: 16px; font-size: 14px; }
+        
+        /* 第一列：純文字識別 */
+        .hardware-row { color: #ffffff; font-weight: bold; font-size: 14px; margin-bottom: 12px; }
+        
+        /* 第二列：編碼與連線狀態並排（新調整） */
+        .config-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+        .encode-group { color: #69f0ae; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+        .encode-toggle { background: rgba(255,255,255,0.1); border: 1px solid #69f0ae; color: #69f0ae; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
         
         .status-btn {
             background: transparent; border: 1px solid #ff5252; color: #ff5252;
-            padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;
+            padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s ease;
         }
         .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
         .status-btn.connecting { border-color: #ffd740; color: #ffd740; }
 
-        .config-row { display: flex; justify-content: flex-start; align-items: center; color: #69f0ae; font-size: 14px; margin-bottom: 16px; }
-        .encode-toggle { background: rgba(255,255,255,0.1); border: 1px solid #69f0ae; color: #69f0ae; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        .input-group { display: flex; gap: 8px; }
+        /* 第三列：輸入與操作按鈕（新增清除鍵） */
+        .input-group { display: flex; gap: 8px; align-items: center; }
         .input-group input { flex: 1; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px 4px; font-size: 16px; outline: none; }
         .input-group input:disabled { border-bottom: 2px solid #37474f; color: #555555; }
+        
+        /* 按鈕基礎樣式 */
         .input-group button { background: transparent; border: none; color: #ffffff; font-size: 16px; cursor: pointer; padding: 6px 12px; }
         .input-group button:disabled { color: #555555; cursor: not-allowed; }
+        /* 清除按鈕特定顏色 */
+        #clear-btn { color: #ffb74d; } 
+        #clear-btn:disabled { color: #555555; }
 
+        /* 功能選單區 */
         .menu-section { padding: 0 12px; margin-bottom: 8px; }
         .menu-title { color: #aaaaaa; font-size: 14px; margin-bottom: 6px; }
         .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 180px; overflow-y: auto; contain: content; }
         .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; text-align: left; font-size: 13px; font-family: monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .menu-grid button:active { background-color: #333333; }
 
+        /* 接收控制台 */
         .console-section { flex: 1; margin: 0 12px 12px 12px; display: flex; flex-direction: column; overflow: hidden; }
         .console-title { color: #aaaaaa; font-size: 14px; margin-bottom: 4px; }
         .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; line-height: 1.4; overflow-y: scroll; white-space: pre-wrap; word-break: break-all; -webkit-overflow-scrolling: touch; }
@@ -45,15 +60,19 @@
     <div class="header">空調系統重置</div>
 
     <div class="control-panel">
-        <div class="status-row">
-            <span id="hardware-id">線材識別：等待藍牙序列埠連線...</span>
+        <div class="hardware-row" id="hardware-id">線材識別：等待藍牙序列埠連線...</div>
+        
+        <div class="config-row">
+            <div class="encode-group">
+                <span>編碼：</span>
+                <button class="encode-toggle" id="encode-btn" onclick="toggleEncoding()">ASCII</button>
+            </div>
             <button class="status-btn" id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
         </div>
-        <div class="config-row">
-            <span>編碼：<button class="encode-toggle" id="encode-btn" onclick="toggleEncoding()">ASCII</button></span>
-        </div>
+        
         <div class="input-group">
             <input type="text" id="cmd-input" placeholder="請先連接硬體設備..." disabled>
+            <button id="clear-btn" onclick="clearConsole()">清除</button>
             <button id="send-btn" onclick="sendManualCmd()" disabled>傳送</button>
         </div>
     </div>
@@ -72,12 +91,11 @@
 
     <script>
         // 匯入 Capacitor 藍牙插件（編譯成 App 後生效）
-        // 註：在一般瀏覽器直接開啟此網頁會因找不到 BleClient 而報錯，需在 Capacitor 殼中運行
         const { BleClient } = window.Capacitor?.Plugins || {};
 
-        // ⚠️ 請依據您購買的「RS232轉藍牙模組」說明書，修改以下 UUID
-        const BLUE_SERIAL_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'; // 範例：常見的 CC2541 / HM-10 通用序列服務
-        const BLUE_SERIAL_CHAR_UUID    = '0000ffe1-0000-1000-8000-00805f9b34fb'; // 範例：資料讀寫特徵值
+        // 通用工控藍牙 UUID 配置
+        const BLUE_SERIAL_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'; 
+        const BLUE_SERIAL_CHAR_UUID    = '0000ffe1-0000-1000-8000-00805f9b34fb'; 
 
         const terminalBox = document.getElementById('terminal-box');
         const menuGrid = document.getElementById('ui-menu-grid');
@@ -94,7 +112,7 @@
         let currentEncoding = 'ASCII';
         let isConnected = false;
         let activeDevice = null;
-        let dataBuffer = ""; // 用於拼接斷字碎片的快取
+        let dataBuffer = ""; 
 
         // 主按鈕控制開關
         async function handleConnectionClick() {
@@ -105,9 +123,7 @@
             }
         }
 
-        // ==========================================
-        // 核心：【真實連線確認】與數據接收
-        // ==========================================
+        // 建立真實連接
         async function connectToHardware() {
             try {
                 connStatus.innerText = "[連線中...]";
@@ -115,21 +131,17 @@
                 hardwareId.innerText = "線材識別：正在啟動藍牙掃描...";
                 appendLogToTerminal("[系統]: 正在初始化藍牙模組...");
 
-                // 1. 初始化 Capacitor 藍牙客戶端
                 await BleClient.initialize();
 
-                // 2. 彈出系統原生的藍牙設備選擇視窗（過濾專屬工控服務的設備）
-                appendLogToTerminal("[系統]: 請在 iOS / Android 跳出視窗中選擇您的 RS232 藍牙模組...");
+                appendLogToTerminal("[系統]: 請在系統彈出視窗中選擇您的 RS232 藍牙模組...");
                 activeDevice = await BleClient.requestDevice({
                     services: [BLUE_SERIAL_SERVICE_UUID]
                 });
 
                 hardwareId.innerText = `正在連接: ${activeDevice.name || '未命名裝置'}`;
                 
-                // 3. 【關鍵確認點】真正向硬體發出異步連接，沒連上就會直接摔進 catch 區
                 await BleClient.connect(activeDevice.deviceId);
 
-                // 4. 連線真的成功了，才會執行到這一行！翻綠解鎖 UI
                 isConnected = true;
                 connStatus.innerText = "[已連線]";
                 connStatus.className = "status-btn connected";
@@ -141,20 +153,17 @@
                 sendBtn.disabled = false;
                 menuPlaceholder.innerText = "已成功確認連線，等待設備回傳數據...";
 
-                // 5. 開始真聽（Notify）硬體傳過來的資料流
                 await BleClient.startNotifications(
                     activeDevice.deviceId,
                     BLUE_SERIAL_SERVICE_UUID,
                     BLUE_SERIAL_CHAR_UUID,
                     (value) => {
-                        // 收到的是二進位 DataView，依據所選編碼轉換為字串
                         let chunk = decodeDataView(value);
                         handleRawChunk(chunk);
                     }
                 );
 
             } catch (error) {
-                // ❌ 只要硬體沒開機、斷線、配對失敗，絕對不會顯示連線成功
                 console.error("連線出錯：", error);
                 isConnected = false;
                 connStatus.innerText = "[連線失敗]";
@@ -164,29 +173,45 @@
             }
         }
 
-        // 處理藍牙拼字碎片與分行（斷字處理）
+        // 一鍵清除畫面功能
+        function clearConsole() {
+            // 1. 清空控制台 Log
+            terminalBox.innerHTML = '';
+            
+            // 2. 重置選單狀態，讓設備如果再傳選單時能重新解析
+            isMenuParsed = false;
+            menuRawLines = [];
+            
+            // 3. 依據目前的連線狀態調整選單區的預設文字
+            if (isConnected) {
+                menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，等待硬體下一筆選單數據...</div>';
+            } else {
+                menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
+            }
+
+            // 在控制台印出一行提示
+            appendLogToTerminal("[系統]: 畫面與暫存選單已清除。");
+        }
+
+        // 處理藍牙拼字碎片
         function handleRawChunk(chunk) {
             dataBuffer += chunk;
-            // 當快取裡有換行符號時，拆出完整的一行行字串處理
             if (dataBuffer.includes('\n')) {
                 let lines = dataBuffer.split('\n');
-                // 最後一筆可能不完整，留回快取
                 dataBuffer = lines.pop(); 
-                
                 lines.forEach(line => {
                     processIncomingLine(line);
                 });
             }
         }
 
-        // 資料過濾路由器 (Data Router)
+        // 資料過濾路由器
         function processIncomingLine(line) {
             const trimmedLine = line.trim();
             if (!trimmedLine) return;
 
             appendLogToTerminal(line);
 
-            // 判斷是否為您的 (1) 到 (11) 選單特徵
             const isMenuPattern = /^\(\d+\)|^\d+\./.test(trimmedLine);
 
             if (isMenuPattern) {
@@ -197,8 +222,8 @@
                     clearTimeout(window.menuRenderTimer);
                     window.menuRenderTimer = setTimeout(() => {
                         renderUiMenu(menuRawLines);
-                        isMenuParsed = true; // 固化選單，不再重新渲染
-                    }, 250); // 緩衝時間，確保整套選單行數收齊
+                        isMenuParsed = true; 
+                    }, 250); 
                 }
             }
         }
@@ -218,19 +243,14 @@
             });
         }
 
-        // ==========================================
-        // 【真實資料發送】向隨附硬體寫入指令
-        // ==========================================
+        // 真實資料發送
         async function executeCommand(cmdNum) {
             if (!isConnected || !activeDevice) return;
             try {
                 appendLogToTerminal(`\n[WebApp 發送指令]: ${cmdNum}\n`);
-                
-                // 將字串指令加上換行符（工控終端機常用 \r\n 或 \r）並轉成二進位
                 const encoder = new TextEncoder();
                 const data = encoder.encode(cmdNum + "\r\n");
 
-                // 真正透過藍牙寫入硬體
                 await BleClient.write(
                     activeDevice.deviceId,
                     BLUE_SERIAL_SERVICE_UUID,
@@ -274,7 +294,7 @@
             appendLogToTerminal("\n[系統]: 已安全斷開藍牙序列埠連線。\n");
         }
 
-        // 解碼器：支援 ASCII 與 BIG5
+        // 解碼器
         function decodeDataView(dataView) {
             const encodingMode = currentEncoding === 'BIG5' ? 'big5' : 'ascii';
             const decoder = new TextDecoder(encodingMode);
