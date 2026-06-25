@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>空調系統重置 - PWA 網頁藍牙版</title>
+    <title>空調系統重置 - PWA 網頁藍牙修復版</title>
     
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -117,7 +117,6 @@
         let currentEncoding = 'ASCII';
         let isConnected = false;
         
-        // 網頁原生藍牙對象暫存
         let g_device = null;
         let g_gattServer = null;
         let g_rxCharacteristic = null;
@@ -136,12 +135,10 @@
             }
         }
 
-        // 🌟 改為標準 Web Bluetooth API 驅動
         async function connectToHardware() {
             try {
-                // 1. 強制檢查當前瀏覽器是否支援藍牙
                 if (!navigator.bluetooth) {
-                    alert("【環境不支援藍牙】\n1. 請確保網址開頭是 https:// (http無法啟用藍牙)\n2. 蘋果 iOS 系統的 Safari 與「加入主畫面」不開放網頁藍牙功能。iOS 請改用 App 殼包裝，或在 App Store 下載「Bluefy」或「WebBLE」瀏覽器開啟此網址測試！");
+                    alert("【環境不支援藍牙】\n1. 請確保網址開頭是 https:// (http無法啟用藍牙)\n2. 蘋果 iOS 系統的 Safari 與「加入主畫面」不開放網頁藍牙功能。iOS 請改用 App 殼包裝，或在 App Store 下載「Bluefy」瀏覽器開啟此網址！");
                     resetConnectionUi();
                     return;
                 }
@@ -152,12 +149,14 @@
                 hardwareId.innerText = "線材識別：啟動瀏覽器藍牙搜尋...";
                 appendLogToTerminal(`[系統]: 正在呼叫網頁藍牙組件...`);
 
-                // 2. 請求藍牙裝置（接受所有設備，或是根據常見序列埠專用 UUID 過濾）
+                // 🌟 修正點：將 optionalServices 改為 Chrome 認可的標準 16 進位數值格式或完整 128-bit UUID
                 g_device = await navigator.bluetooth.requestDevice({
                     acceptAllDevices: true,
                     optionalServices: [
-                        '0000ffe0-0000-1000-8000-00805f9b34fb', // 常見 BLE 序列埠通用 UUID
-                        'ff00', 'ffe0', 'fee7'
+                        0xff00, // 修正：改成數值格式型態
+                        0xffe0, 
+                        0xfee7,
+                        '0000ffe0-0000-1000-8000-00805f9b34fb' // 或者是標準 128-bit 字串
                     ]
                 });
 
@@ -173,13 +172,11 @@
                 g_gattServer = await g_device.gatt.connect();
                 appendLogToTerminal(`[系統]: 連線成功，正在探索序列埠服務...`);
 
-                // 3. 獲取主要的 Bluetooth 服務與特徵值
                 const services = await g_gattServer.getPrimaryServices();
                 if(services.length === 0) {
                     throw new Error("找不到任何有效的 GATT 服務");
                 }
                 
-                // 自動尋找具有 Notify 或 Write 權限的特徵通道
                 let targetService = services[0];
                 const characteristics = await targetService.getCharacteristics();
                 
@@ -192,7 +189,6 @@
                     }
                 }
 
-                // 如果自動抓取失敗，則使用通用保底機制
                 if (!g_rxCharacteristic || !g_txCharacteristic) {
                     g_rxCharacteristic = characteristics[0];
                     g_txCharacteristic = characteristics[0];
@@ -209,7 +205,6 @@
                 syncBaudBtn.disabled = false; 
                 menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
 
-                // 4. 開啟數據監聽
                 g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
                 await g_rxCharacteristic.startNotifications();
                 g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
@@ -223,7 +218,7 @@
 
             } catch (error) {
                 console.error(error);
-                alert("【藍牙啟動失敗】:\n" + (error.message || error) + "\n\n提示：請確認硬體是否處於廣播狀態、或網址是否為安全加密的 HTTPS。");
+                alert("【藍牙啟動失敗】:\n" + (error.message || error) + "\n\n提示：請確認硬體是否處於廣播狀態。");
                 resetConnectionUi();
             }
         }
@@ -257,7 +252,6 @@
             try {
                 const encoder = new TextEncoder();
                 const data = encoder.encode(cmdText + "\r\n");
-                // 優先使用不需回應的寫入以提高傳輸速度
                 if (g_txCharacteristic.properties.writeWithoutResponse) {
                     await g_txCharacteristic.writeValueWithoutResponse(data);
                 } else {
