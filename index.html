@@ -217,9 +217,18 @@
                 await sendBle232RawCmd("AT");
 
             } catch (error) {
-                console.error(error);
-                alert("【藍牙啟動失敗】:\n" + (error.message || error) + "\n\n提示：請確認硬體是否處於廣播狀態。");
+            console.error(error);
+
+            // 判斷是否為使用者自己取消
+            if (error.name === 'NotFoundError' || error.message.includes('cancelled')) {
+                appendLogToTerminal("[系統]: 使用者取消了藍牙搜尋。");
                 resetConnectionUi();
+                return; 
+            }
+
+            // 其他真正的失敗才跳彈窗
+            alert("【藍牙啟動失敗】:\n" + (error.message || error) + "\n\n提示：請確認手機藍牙已開啟、App藍牙權限已允許，且硬體處於廣播狀態。");
+            resetConnectionUi();
             }
         }
 
