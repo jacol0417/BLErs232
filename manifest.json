@@ -1,0 +1,15 @@
+{
+  "short_name": "空調重置",
+  "name": "空調系統重置終端機",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ],
+  "start_url": "index.html",
+  "background_color": "#121212",
+  "theme_color": "#004d40",
+  "display": "standalone"
+}
