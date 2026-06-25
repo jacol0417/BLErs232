@@ -3,6 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>空調系統重置 - 介面微調版</title>
     <style>
         body {
@@ -146,6 +149,15 @@
         let activeDevice = null;
         let dataBuffer = ""; 
 
+        // 註冊 Service Worker 啟用離線 PWA 功能
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(reg => console.log('離線快取支援成功！', reg))
+                    .catch(err => console.log('註冊失敗：', err));
+            });
+        }
+        
         function handleBaudChange() {
             const selectedBaud = baudSelect.value;
             appendLogToTerminal(`[設定變更]: 波特率已選定為 ${selectedBaud}。`);
