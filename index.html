@@ -185,8 +185,16 @@
             }
         }
 
+        // 增強除錯版的連線函式
         async function connectToHardware() {
             try {
+                // 防呆檢查：確認 BleClient 模組是否存在
+                if (!BleClient) {
+                    alert("【系統錯誤】: 找不到 Capacitor 藍牙外掛。請確認此網頁是否已正確打包為 App，或檢查是否處於 HTTPS 環境！");
+                    resetConnectionUi();
+                    return;
+                }
+
                 baudSelect.disabled = true;
                 connStatus.innerText = "[連線中...]";
                 connStatus.className = "status-btn connecting";
@@ -195,9 +203,17 @@
 
                 await BleClient.initialize();
 
+                // 彈出系統藍牙選擇視窗
                 activeDevice = await BleClient.requestDevice({
                     acceptAllDevices: true 
                 });
+
+                // 如果使用者在系統視窗點了取消
+                if (!activeDevice) {
+                    alert("未選擇任何藍牙裝置");
+                    resetConnectionUi();
+                    return;
+                }
 
                 hardwareId.innerText = `已連接: ${activeDevice.name || '未命名裝置'}`;
                 await BleClient.connect(activeDevice.deviceId);
@@ -238,14 +254,20 @@
 
             } catch (error) {
                 console.error("連線出錯：", error);
-                isConnected = false;
-                connStatus.innerText = "[連線失敗]";
-                connStatus.className = "status-btn";
-                hardwareId.innerText = "線材識別：連線失敗";
-                baudSelect.disabled = false;
-                syncBaudBtn.disabled = true;
-                appendLogToTerminal(`[錯誤]: 無法建立連線。原因：${error.message || error}`);
+                // 這裡會跳出真實的錯誤原因（例如：User cancelled, Bluetooth disabled 等）
+                alert("【藍牙連線異常】:\n" + (error.message || error));
+                resetConnectionUi();
             }
+        }
+
+        // 抽取出來的 UI 重置輔助函式
+        function resetConnectionUi() {
+            isConnected = false;
+            connStatus.innerText = "[未連線]";
+            connStatus.className = "status-btn";
+            hardwareId.innerText = "線材識別：等待藍牙序列埠連線...";
+            baudSelect.disabled = false;
+            syncBaudBtn.disabled = true;
         }
 
         async function syncHardwareBaud() {
