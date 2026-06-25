@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>空調系統重置 - 終極調試版</title>
+    <title>空調系統重置 - 參數鎖定版</title>
     <style>
         body {
             margin: 0; padding: 0; background-color: #121212; color: #ffffff;
@@ -18,27 +18,36 @@
         /* 第一列：純文字識別 */
         .hardware-row { color: #ffffff; font-weight: bold; font-size: 14px; margin-bottom: 12px; }
         
-        /* 第二列：編碼與連線狀態並排（新調整） */
-        .config-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
-        .encode-group { color: #69f0ae; font-size: 14px; display: flex; align-items: center; gap: 8px; }
+        /* 第二列：編碼、波特率與連線狀態並排（新調整） */
+        .config-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 8px; }
+        .setting-group { display: flex; align-items: center; gap: 12px; color: #69f0ae; font-size: 14px; }
+        
         .encode-toggle { background: rgba(255,255,255,0.1); border: 1px solid #69f0ae; color: #69f0ae; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-weight: bold; }
         
+        /* 波特率下拉選單樣式 */
+        .baud-select {
+            background: #121212; border: 1px solid #69f0ae; color: #69f0ae; 
+            padding: 4px 8px; border-radius: 4px; font-weight: bold; outline: none; cursor: pointer;
+        }
+        .baud-select:disabled {
+            border-color: #37474f; color: #555555; cursor: not-allowed; background: transparent;
+        }
+
         .status-btn {
             background: transparent; border: 1px solid #ff5252; color: #ff5252;
             padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s ease;
+            white-space: nowrap;
         }
         .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
         .status-btn.connecting { border-color: #ffd740; color: #ffd740; }
 
-        /* 第三列：輸入與操作按鈕（新增清除鍵） */
+        /* 第三列：輸入與操作按鈕 */
         .input-group { display: flex; gap: 8px; align-items: center; }
         .input-group input { flex: 1; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px 4px; font-size: 16px; outline: none; }
         .input-group input:disabled { border-bottom: 2px solid #37474f; color: #555555; }
         
-        /* 按鈕基礎樣式 */
         .input-group button { background: transparent; border: none; color: #ffffff; font-size: 16px; cursor: pointer; padding: 6px 12px; }
         .input-group button:disabled { color: #555555; cursor: not-allowed; }
-        /* 清除按鈕特定顏色 */
         #clear-btn { color: #ffb74d; } 
         #clear-btn:disabled { color: #555555; }
 
@@ -63,9 +72,17 @@
         <div class="hardware-row" id="hardware-id">線材識別：等待藍牙序列埠連線...</div>
         
         <div class="config-row">
-            <div class="encode-group">
-                <span>編碼：</span>
-                <button class="encode-toggle" id="encode-btn" onclick="toggleEncoding()">ASCII</button>
+            <div class="setting-group">
+                <span>編碼：<button class="encode-toggle" id="encode-btn" onclick="toggleEncoding()">ASCII</button></span>
+                <span>Baud：
+                    <select class="baud-select" id="baud-rate-select" onchange="handleBaudChange()">
+                        <option value="9600">9600</option>
+                        <option value="19200">19200</option>
+                        <option value="38400">38400</option>
+                        <option value="57600" selected>57600</option>
+                        <option value="115200">115200</option>
+                    </select>
+                </span>
             </div>
             <button class="status-btn" id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
         </div>
@@ -90,16 +107,12 @@
     </div>
 
     <script>
-        // 匯入 Capacitor 藍牙插件（編譯成 App 後生效）
         const { BleClient } = window.Capacitor?.Plugins || {};
-
-        // 通用工控藍牙 UUID 配置
-        const BLUE_SERIAL_SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb'; 
-        const BLUE_SERIAL_CHAR_UUID    = '0000ffe1-0000-1000-8000-00805f9b34fb'; 
 
         const terminalBox = document.getElementById('terminal-box');
         const menuGrid = document.getElementById('ui-menu-grid');
         const encodeBtn = document.getElementById('encode-btn');
+        const baudSelect = document.getElementById('baud-rate-select');
         const connStatus = document.getElementById('conn-status');
         const hardwareId = document.getElementById('hardware-id');
         const cmdInput = document.getElementById('cmd-input');
@@ -114,6 +127,13 @@
         let activeDevice = null;
         let dataBuffer = ""; 
 
+        // 監聽波特率改變（僅在未連線時觸發）
+        function handleBaudChange() {
+            const selectedBaud = baudSelect.value;
+            // 依據 BT-232 規格，預擬對應的 AT 指令提示（實際更換指令需參閱該轉換器手冊，如 AT+BAUD=57600）
+            appendLogToTerminal(`[設定變更]: 波特率已選定為 ${selectedBaud}。連線時將自動以此速率進行藍牙初始化。`);
+        }
+
         // 主按鈕控制開關
         async function handleConnectionClick() {
             if (!isConnected) {
@@ -126,42 +146,61 @@
         // 建立真實連接
         async function connectToHardware() {
             try {
+                // 1. 🔒 安全鎖定：一旦點擊連線，立刻全面停用「波特率選單」，防止在通訊中途被修改
+                baudSelect.disabled = true;
+
                 connStatus.innerText = "[連線中...]";
                 connStatus.className = "status-btn connecting";
                 hardwareId.innerText = "線材識別：正在啟動藍牙掃描...";
-                appendLogToTerminal("[系統]: 正在初始化藍牙模組...");
+                appendLogToTerminal(`[系統]: 正在初始化藍牙模組 (設定波特率: ${baudSelect.value})...`);
 
                 await BleClient.initialize();
 
                 appendLogToTerminal("[系統]: 請在系統彈出視窗中選擇您的 RS232 藍牙模組...");
                 activeDevice = await BleClient.requestDevice({
-                    services: [BLUE_SERIAL_SERVICE_UUID]
+                    acceptAllDevices: true 
                 });
 
                 hardwareId.innerText = `正在連接: ${activeDevice.name || '未命名裝置'}`;
                 
                 await BleClient.connect(activeDevice.deviceId);
 
+                // 自動探索該設備所有的服務通道
+                const services = await BleClient.getServices(activeDevice.deviceId);
+                const targetService = services[0]?.uuid;
+                const targetChar = services[0]?.characteristics[0]?.uuid;
+
+                if (!targetService || !targetChar) {
+                    throw new Error("無法辨識該模組的序列埠通道");
+                }
+
+                // 2. 只有在此處確認成功連線，才會保持鎖定狀態
                 isConnected = true;
                 connStatus.innerText = "[已連線]";
                 connStatus.className = "status-btn connected";
                 hardwareId.innerText = `線材識別：已連線至 ${activeDevice.name}`;
-                appendLogToTerminal(`[系統]: 成功與硬體建立安全通道！`);
+                appendLogToTerminal(`[系統]: 成功與硬體建立安全通道！目前波特率鎖定於: ${baudSelect.value}`);
 
                 cmdInput.disabled = false;
                 cmdInput.placeholder = "請輸入指令";
                 sendBtn.disabled = false;
                 menuPlaceholder.innerText = "已成功確認連線，等待設備回傳數據...";
 
+                // 如果您的藍牙線需要上電時由 App 發送 AT 指令去同步波特率，可在這裡加入：
+                // await executeAtCommand(`AT+BAUD=${baudSelect.value}`);
+
                 await BleClient.startNotifications(
                     activeDevice.deviceId,
-                    BLUE_SERIAL_SERVICE_UUID,
-                    BLUE_SERIAL_CHAR_UUID,
+                    targetService,
+                    targetChar,
                     (value) => {
                         let chunk = decodeDataView(value);
                         handleRawChunk(chunk);
                     }
                 );
+
+                window.CURRENT_SERVICE_UUID = targetService;
+                window.CURRENT_CHAR_UUID = targetChar;
 
             } catch (error) {
                 console.error("連線出錯：", error);
@@ -169,27 +208,51 @@
                 connStatus.innerText = "[連線失敗]";
                 connStatus.className = "status-btn";
                 hardwareId.innerText = "線材識別：連線失敗";
+                
+                // ❌ 連線失敗，解鎖波特率選單讓使用者可以調整後再試
+                baudSelect.disabled = false;
                 appendLogToTerminal(`[錯誤]: 無法建立連線。原因：${error.message || error}`);
             }
         }
 
-        // 一鍵清除畫面功能
-        function clearConsole() {
-            // 1. 清空控制台 Log
-            terminalBox.innerHTML = '';
-            
-            // 2. 重置選單狀態，讓設備如果再傳選單時能重新解析
+        // 斷開真實連線
+        async function disconnectHardware() {
+            if (activeDevice) {
+                try {
+                    await BleClient.stopNotifications(activeDevice.deviceId, window.CURRENT_SERVICE_UUID, window.CURRENT_CHAR_UUID);
+                    await BleClient.disconnect(activeDevice.deviceId);
+                } catch (e) { console.log("斷線清理異常", e); }
+            }
+            isConnected = false;
             isMenuParsed = false;
             menuRawLines = [];
+            dataBuffer = "";
             
-            // 3. 依據目前的連線狀態調整選單區的預設文字
+            connStatus.innerText = "[未連線]";
+            connStatus.className = "status-btn";
+            hardwareId.innerText = "線材識別：等待藍牙序列埠連線...";
+            cmdInput.disabled = true;
+            cmdInput.value = "";
+            cmdInput.placeholder = "請先連接硬體設備...";
+            sendBtn.disabled = true;
+            
+            // 🔓 解鎖選單：完全斷開連線後，重新開放變更波特率
+            baudSelect.disabled = false;
+
+            menuGrid.innerHTML = '<div style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
+            appendLogToTerminal("\n[系統]: 已安全斷開藍牙序列埠連線。通訊參數已解鎖。\n");
+        }
+
+        // 一鍵清除畫面功能
+        function clearConsole() {
+            terminalBox.innerHTML = '';
+            isMenuParsed = false;
+            menuRawLines = [];
             if (isConnected) {
                 menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，等待硬體下一筆選單數據...</div>';
             } else {
                 menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
             }
-
-            // 在控制台印出一行提示
             appendLogToTerminal("[系統]: 畫面與暫存選單已清除。");
         }
 
@@ -253,8 +316,8 @@
 
                 await BleClient.write(
                     activeDevice.deviceId,
-                    BLUE_SERIAL_SERVICE_UUID,
-                    BLUE_SERIAL_CHAR_UUID,
+                    window.CURRENT_SERVICE_UUID,
+                    window.CURRENT_CHAR_UUID,
                     data
                 );
             } catch (error) {
@@ -268,30 +331,6 @@
                 executeCommand(input.value);
                 input.value = '';
             }
-        }
-
-        // 斷開真實連線
-        async function disconnectHardware() {
-            if (activeDevice) {
-                try {
-                    await BleClient.stopNotifications(activeDevice.deviceId, BLUE_SERIAL_SERVICE_UUID, BLUE_SERIAL_CHAR_UUID);
-                    await BleClient.disconnect(activeDevice.deviceId);
-                } catch (e) { console.log("斷線清理異常", e); }
-            }
-            isConnected = false;
-            isMenuParsed = false;
-            menuRawLines = [];
-            dataBuffer = "";
-            
-            connStatus.innerText = "[未連線]";
-            connStatus.className = "status-btn";
-            hardwareId.innerText = "線材識別：等待藍牙序列埠連線...";
-            cmdInput.disabled = true;
-            cmdInput.value = "";
-            cmdInput.placeholder = "請先連接硬體設備...";
-            sendBtn.disabled = true;
-            menuGrid.innerHTML = '<div style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
-            appendLogToTerminal("\n[系統]: 已安全斷開藍牙序列埠連線。\n");
         }
 
         // 解碼器
