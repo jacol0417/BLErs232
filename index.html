@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>空調系統重置PWA版</title>
+    <title>空調系統重置 - PWA 網頁藍牙版</title>
     
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -16,82 +16,31 @@
             display: flex; flex-direction: column; height: 100vh; overflow: hidden;
         }
         .header { background-color: #004d40; color: #ffffff; text-align: center; padding: 12px 0; font-size: 20px; font-weight: bold; letter-spacing: 2px; }
-        
-        /* 藍色控制面板 */
         .control-panel { background-color: #0d47a1; margin: 12px; padding: 14px; border-radius: 8px; }
-        
-        /* 第一列：線材識別與連線狀態並排 */
-        .hardware-row { 
-            display: flex; justify-content: space-between; align-items: center; 
-            color: #ffffff; font-weight: bold; font-size: 14px; margin-bottom: 12px; 
-        }
+        .hardware-row { display: flex; justify-content: space-between; align-items: center; color: #ffffff; font-weight: bold; font-size: 14px; margin-bottom: 12px; }
         .hardware-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
-        
-        /* 第二列：編碼、波特率 與 同步按鈕並排 */
         .config-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 8px; }
         .setting-group { display: flex; align-items: center; gap: 10px; color: #69f0ae; font-size: 14px; }
-        
         .encode-toggle { background: rgba(255,255,255,0.1); border: 1px solid #69f0ae; color: #69f0ae; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        
-        .baud-select {
-            background: #121212; border: 1px solid #69f0ae; color: #69f0ae; 
-            padding: 4px 6px; border-radius: 4px; font-weight: bold; outline: none; cursor: pointer;
-        }
-        .baud-select:disabled {
-            border-color: #37474f; color: #555555; cursor: not-allowed; background: transparent;
-        }
-
-        /* 同步 Baud 按鈕（在 Baud 右側） */
-        #sync-baud-btn { 
-            background: transparent; border: 1px solid #ffd740; color: #ffd740; 
-            padding: 4px 10px; border-radius: 4px; font-size: 13px; font-weight: bold; cursor: pointer;
-            white-space: nowrap; flex-shrink: 0;
-        }
+        .baud-select { background: #121212; border: 1px solid #69f0ae; color: #69f0ae; padding: 4px 6px; border-radius: 4px; font-weight: bold; outline: none; cursor: pointer; }
+        .baud-select:disabled { border-color: #37474f; color: #555555; cursor: not-allowed; background: transparent; }
+        #sync-baud-btn { background: transparent; border: 1px solid #ffd740; color: #ffd740; padding: 4px 10px; border-radius: 4px; font-size: 13px; font-weight: bold; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
         #sync-baud-btn:disabled { color: #555555; border-color: #37474f; cursor: not-allowed; }
-
-        /* 連線狀態按鈕（在線材識別右側） */
-        .status-btn {
-            background: transparent; border: 1px solid #ff5252; color: #ff5252;
-            padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s ease;
-            white-space: nowrap; flex-shrink: 0;
-        }
+        .status-btn { background: transparent; border: 1px solid #ff5252; color: #ff5252; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s ease; white-space: nowrap; flex-shrink: 0; }
         .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
         .status-btn.connecting { border-color: #ffd740; color: #ffd740; }
-
-        /* 第三列：純輸入與操作按鈕 */
         .input-group { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-        
-        .input-group input { 
-            flex: 1; 
-            min-width: 80px;
-            background: transparent; border: none; border-bottom: 2px solid #546e7a; 
-            color: #ffffff; padding: 6px 4px; font-size: 16px; outline: none; 
-        }
+        .input-group input { flex: 1; min-width: 80px; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px 4px; font-size: 16px; outline: none; }
         .input-group input:disabled { border-bottom: 2px solid #37474f; color: #555555; }
-        
-        .input-group button { 
-            background: transparent; border: 1px solid #ffffff; border-radius: 4px;
-            color: #ffffff; font-size: 14px; cursor: pointer; 
-            padding: 6px 12px; 
-            white-space: nowrap; 
-            flex-shrink: 0; 
-        }
+        .input-group button { background: transparent; border: 1px solid #ffffff; border-radius: 4px; color: #ffffff; font-size: 14px; cursor: pointer; padding: 6px 12px; white-space: nowrap; flex-shrink: 0; }
         .input-group button:disabled { color: #555555; border-color: #37474f; cursor: not-allowed; }
-        
         #clear-btn { color: #ffb74d; border-color: #ffb74d; } 
-        #clear-btn:disabled { color: #555555; border-color: #37474f; }
-        
         #send-btn { color: #69f0ae; border-color: #69f0ae; }
-        #send-btn:disabled { color: #555555; border-color: #37474f; }
-
-        /* 功能選單區 */
         .menu-section { padding: 0 12px; margin-bottom: 8px; }
         .menu-title { color: #aaaaaa; font-size: 14px; margin-bottom: 6px; }
         .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 180px; overflow-y: auto; contain: content; }
         .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; text-align: left; font-size: 13px; font-family: monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .menu-grid button:active { background-color: #333333; }
-
-        /* 接收控制台 */
         .console-section { flex: 1; margin: 0 12px 12px 12px; display: flex; flex-direction: column; overflow: hidden; }
         .console-title { color: #aaaaaa; font-size: 14px; margin-bottom: 4px; }
         .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; line-height: 1.4; overflow-y: scroll; white-space: pre-wrap; word-break: break-all; -webkit-overflow-scrolling: touch; }
@@ -103,7 +52,7 @@
 
     <div class="control-panel">
         <div class="hardware-row">
-            <div class="hardware-title" id="hardware-id">線材識別：等待藍牙序列埠連線...</div>
+            <div class="hardware-title" id="hardware-id">線材識別：等待網頁藍牙連線...</div>
             <button class="status-btn" id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
         </div>
         
@@ -143,16 +92,13 @@
     </div>
 
     <script>
-        // 🌟 核心：註冊 Service Worker 以實現 iOS 主畫面完全離線執行
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('sw.js')
-                    .then(reg => console.log('PWA 離線快取支援成功啟用！', reg))
+                    .then(reg => console.log('PWA 離線快取啟用！', reg))
                     .catch(err => console.error('PWA 註冊失敗：', err));
             });
         }
-
-        const { BleClient } = window.Capacitor?.Plugins || {};
 
         const terminalBox = document.getElementById('terminal-box');
         const menuGrid = document.getElementById('ui-menu-grid');
@@ -170,7 +116,12 @@
         let maxLogLines = 200; 
         let currentEncoding = 'ASCII';
         let isConnected = false;
-        let activeDevice = null;
+        
+        // 網頁原生藍牙對象暫存
+        let g_device = null;
+        let g_gattServer = null;
+        let g_rxCharacteristic = null;
+        let g_txCharacteristic = null;
         let dataBuffer = ""; 
 
         function handleBaudChange() {
@@ -185,12 +136,12 @@
             }
         }
 
-        // 增強除錯版的連線函式
+        // 🌟 改為標準 Web Bluetooth API 驅動
         async function connectToHardware() {
             try {
-                // 防呆檢查：確認 BleClient 模組是否存在
-                if (!BleClient) {
-                    alert("【系統錯誤】: 找不到 Capacitor 藍牙外掛。請確認此網頁是否已正確打包為 App，或檢查是否處於 HTTPS 環境！");
+                // 1. 強制檢查當前瀏覽器是否支援藍牙
+                if (!navigator.bluetooth) {
+                    alert("【環境不支援藍牙】\n1. 請確保網址開頭是 https:// (http無法啟用藍牙)\n2. 蘋果 iOS 系統的 Safari 與「加入主畫面」不開放網頁藍牙功能。iOS 請改用 App 殼包裝，或在 App Store 下載「Bluefy」或「WebBLE」瀏覽器開啟此網址測試！");
                     resetConnectionUi();
                     return;
                 }
@@ -198,37 +149,59 @@
                 baudSelect.disabled = true;
                 connStatus.innerText = "[連線中...]";
                 connStatus.className = "status-btn connecting";
-                hardwareId.innerText = "線材識別：啟動藍牙掃描...";
-                appendLogToTerminal(`[系統]: 正在初始化藍牙模組 (預計目標速率: ${baudSelect.value})...`);
+                hardwareId.innerText = "線材識別：啟動瀏覽器藍牙搜尋...";
+                appendLogToTerminal(`[系統]: 正在呼叫網頁藍牙組件...`);
 
-                await BleClient.initialize();
-
-                // 彈出系統藍牙選擇視窗
-                activeDevice = await BleClient.requestDevice({
-                    acceptAllDevices: true 
+                // 2. 請求藍牙裝置（接受所有設備，或是根據常見序列埠專用 UUID 過濾）
+                g_device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: [
+                        '0000ffe0-0000-1000-8000-00805f9b34fb', // 常見 BLE 序列埠通用 UUID
+                        'ff00', 'ffe0', 'fee7'
+                    ]
                 });
 
-                // 如果使用者在系統視窗點了取消
-                if (!activeDevice) {
-                    alert("未選擇任何藍牙裝置");
+                if (!g_device) {
+                    alert("您取消了藍牙選擇視窗");
                     resetConnectionUi();
                     return;
                 }
 
-                hardwareId.innerText = `已連接: ${activeDevice.name || '未命名裝置'}`;
-                await BleClient.connect(activeDevice.deviceId);
+                hardwareId.innerText = `已選取: ${g_device.name || '未命名裝置'}`;
+                appendLogToTerminal(`[系統]: 正在建立 GATT 連線...`);
+                
+                g_gattServer = await g_device.gatt.connect();
+                appendLogToTerminal(`[系統]: 連線成功，正在探索序列埠服務...`);
 
-                const services = await BleClient.getServices(activeDevice.deviceId);
-                const targetService = services[0]?.uuid;
-                const targetChar = services[0]?.characteristics[0]?.uuid;
+                // 3. 獲取主要的 Bluetooth 服務與特徵值
+                const services = await g_gattServer.getPrimaryServices();
+                if(services.length === 0) {
+                    throw new Error("找不到任何有效的 GATT 服務");
+                }
+                
+                // 自動尋找具有 Notify 或 Write 權限的特徵通道
+                let targetService = services[0];
+                const characteristics = await targetService.getCharacteristics();
+                
+                for (let char of characteristics) {
+                    if (char.properties.notify || char.properties.indicate) {
+                        g_rxCharacteristic = char;
+                    }
+                    if (char.properties.write || char.properties.writeWithoutResponse) {
+                        g_txCharacteristic = char;
+                    }
+                }
 
-                if (!targetService || !targetChar) {
-                    throw new Error("無法辨識該模組的序列埠通道");
+                // 如果自動抓取失敗，則使用通用保底機制
+                if (!g_rxCharacteristic || !g_txCharacteristic) {
+                    g_rxCharacteristic = characteristics[0];
+                    g_txCharacteristic = characteristics[0];
                 }
 
                 isConnected = true;
                 connStatus.innerText = "[已連線]";
                 connStatus.className = "status-btn connected";
+                hardwareId.innerText = `已連接: ${g_device.name || '序列埠設備'}`;
                 
                 cmdInput.disabled = false;
                 cmdInput.placeholder = "請輸入指令 (例如: BAUD=?)";
@@ -236,38 +209,39 @@
                 syncBaudBtn.disabled = false; 
                 menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
 
-                window.CURRENT_SERVICE_UUID = targetService;
-                window.CURRENT_CHAR_UUID = targetChar;
+                // 4. 開啟數據監聽
+                g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
+                await g_rxCharacteristic.startNotifications();
+                g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    let value = event.target.value;
+                    let chunk = decodeDataView(value);
+                    handleRawChunk(chunk);
+                });
 
-                await BleClient.startNotifications(
-                    activeDevice.deviceId,
-                    targetService,
-                    targetChar,
-                    (value) => {
-                        let chunk = decodeDataView(value);
-                        handleRawChunk(chunk);
-                    }
-                );
-
-                appendLogToTerminal(`[系統]: 成功建立通道！正在自動發送 'AT' 驗證連線狀態...`);
+                appendLogToTerminal(`[系統]: 通道建立完畢！自動發送 'AT' 測試連線...`);
                 await sendBle232RawCmd("AT");
 
             } catch (error) {
-                console.error("連線出錯：", error);
-                // 這裡會跳出真實的錯誤原因（例如：User cancelled, Bluetooth disabled 等）
-                alert("【藍牙連線異常】:\n" + (error.message || error));
+                console.error(error);
+                alert("【藍牙啟動失敗】:\n" + (error.message || error) + "\n\n提示：請確認硬體是否處於廣播狀態、或網址是否為安全加密的 HTTPS。");
                 resetConnectionUi();
             }
         }
 
-        // 抽取出來的 UI 重置輔助函式
         function resetConnectionUi() {
             isConnected = false;
             connStatus.innerText = "[未連線]";
             connStatus.className = "status-btn";
-            hardwareId.innerText = "線材識別：等待藍牙序列埠連線...";
+            hardwareId.innerText = "線材識別：等待網頁藍牙連線...";
             baudSelect.disabled = false;
             syncBaudBtn.disabled = true;
+        }
+
+        function onDeviceDisconnected() {
+            appendLogToTerminal("\n[警報]: 藍牙連線已從硬體端斷開！\n");
+            resetConnectionUi();
+            cmdInput.disabled = true;
+            sendBtn.disabled = true;
         }
 
         async function syncHardwareBaud() {
@@ -279,15 +253,16 @@
         }
 
         async function sendBle232RawCmd(cmdText) {
+            if (!g_txCharacteristic) return;
             try {
                 const encoder = new TextEncoder();
                 const data = encoder.encode(cmdText + "\r\n");
-                await BleClient.write(
-                    activeDevice.deviceId,
-                    window.CURRENT_SERVICE_UUID,
-                    window.CURRENT_CHAR_UUID,
-                    data
-                );
+                // 優先使用不需回應的寫入以提高傳輸速度
+                if (g_txCharacteristic.properties.writeWithoutResponse) {
+                    await g_txCharacteristic.writeValueWithoutResponse(data);
+                } else {
+                    await g_txCharacteristic.writeValueWithResponse(data);
+                }
             } catch (error) {
                 appendLogToTerminal(`[指令發送失敗]: ${error.message}`);
             }
@@ -297,38 +272,26 @@
             const input = document.getElementById('cmd-input');
             if (input.value && isConnected) {
                 appendLogToTerminal(`\n[手動發送]: ${input.value}\n`);
-                await sendBle232RawCmd(input.value);
+                sendBle232RawCmd(input.value);
                 input.value = '';
             }
         }
 
-        async function executeCommand(cmdNum) {
+        function executeCommand(cmdNum) {
             if (!isConnected) return;
             appendLogToTerminal(`\n[WebApp 選單指令]: ${cmdNum}\n`);
-            await sendBle232RawCmd(cmdNum);
+            sendBle232RawCmd(cmdNum);
         }
 
         async function disconnectHardware() {
-            if (activeDevice) {
-                try {
-                    await BleClient.stopNotifications(activeDevice.deviceId, window.CURRENT_SERVICE_UUID, window.CURRENT_CHAR_UUID);
-                    await BleClient.disconnect(activeDevice.deviceId);
-                } catch (e) { console.log("斷線清理異常", e); }
+            if (g_device && g_device.gatt.connected) {
+                g_device.gatt.disconnect();
             }
             isConnected = false;
             isMenuParsed = false;
             menuRawLines = [];
             dataBuffer = "";
-            
-            connStatus.innerText = "[未連線]";
-            connStatus.className = "status-btn";
-            hardwareId.innerText = "線材識別：等待藍牙序列埠連線...";
-            cmdInput.disabled = true;
-            cmdInput.value = "";
-            cmdInput.placeholder = "請先連接硬體...";
-            sendBtn.disabled = true;
-            syncBaudBtn.disabled = true; 
-            baudSelect.disabled = false;
+            resetConnectionUi();
 
             menuGrid.innerHTML = '<div style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
             appendLogToTerminal("\n[系統]: 已安全斷開藍牙序列埠連線。\n");
