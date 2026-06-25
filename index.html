@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>空調系統重置 - PWA 網頁藍牙修復版</title>
+    <title>空調系統重置 - 藍牙盲搜修復版</title>
     
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -138,7 +138,7 @@
         async function connectToHardware() {
             try {
                 if (!navigator.bluetooth) {
-                    alert("【環境不支援藍牙】\n1. 請確保網址開頭是 https:// (http無法啟用藍牙)\n2. 蘋果 iOS 系統的 Safari 與「加入主畫面」不開放網頁藍牙功能。iOS 請改用 App 殼包裝，或在 App Store 下載「Bluefy」瀏覽器開啟此網址！");
+                    alert("【環境不支援藍牙】\n1. 請確保網址開頭是 https://\n2. iOS 請使用 Bluefy 瀏覽器開啟！");
                     resetConnectionUi();
                     return;
                 }
@@ -149,15 +149,9 @@
                 hardwareId.innerText = "線材識別：啟動瀏覽器藍牙搜尋...";
                 appendLogToTerminal(`[系統]: 正在呼叫網頁藍牙組件...`);
 
-                // 🌟 修正點：將 optionalServices 改為 Chrome 認可的標準 16 進位數值格式或完整 128-bit UUID
+                // 🌟 修正點：改為最放鬆的盲搜模式，完全不篩選任何條件
                 g_device = await navigator.bluetooth.requestDevice({
-                    acceptAllDevices: true,
-                    optionalServices: [
-                        0xff00, // 修正：改成數值格式型態
-                        0xffe0, 
-                        0xfee7,
-                        '0000ffe0-0000-1000-8000-00805f9b34fb' // 或者是標準 128-bit 字串
-                    ]
+                    acceptAllDevices: true
                 });
 
                 if (!g_device) {
@@ -172,6 +166,7 @@
                 g_gattServer = await g_device.gatt.connect();
                 appendLogToTerminal(`[系統]: 連線成功，正在探索序列埠服務...`);
 
+                // 🌟 盲搜模式連線後，動態抓取硬體第一個可用的服務
                 const services = await g_gattServer.getPrimaryServices();
                 if(services.length === 0) {
                     throw new Error("找不到任何有效的 GATT 服務");
@@ -217,18 +212,17 @@
                 await sendBle232RawCmd("AT");
 
             } catch (error) {
-            console.error(error);
+                console.error(error);
+                
+                // 增加防呆：如果是使用者自己手動取消，不要跳討厭的彈窗
+                if (error.name === 'NotFoundError' || error.message.includes('cancel')) {
+                    appendLogToTerminal("[系統]: 使用者取消了藍牙搜尋。");
+                    resetConnectionUi();
+                    return;
+                }
 
-            // 判斷是否為使用者自己取消
-            if (error.name === 'NotFoundError' || error.message.includes('cancelled')) {
-                appendLogToTerminal("[系統]: 使用者取消了藍牙搜尋。");
+                alert("【藍牙啟動失敗】:\n" + (error.message || error) + "\n\n提示：請確認硬體是否處於廣播狀態。");
                 resetConnectionUi();
-                return; 
-            }
-
-            // 其他真正的失敗才跳彈窗
-            alert("【藍牙啟動失敗】:\n" + (error.message || error) + "\n\n提示：請確認手機藍牙已開啟、App藍牙權限已允許，且硬體處於廣播狀態。");
-            resetConnectionUi();
             }
         }
 
