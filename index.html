@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>空調系統重置 - 藍牙盲搜修復版</title>
+    <title>空調系統重置</title>
     
     <link rel="manifest" href="manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -17,30 +17,32 @@
         }
         .header { background-color: #004d40; color: #ffffff; text-align: center; padding: 12px 0; font-size: 20px; font-weight: bold; letter-spacing: 2px; }
         .control-panel { background-color: #0d47a1; margin: 12px; padding: 14px; border-radius: 8px; }
-        .hardware-row { display: flex; justify-content: space-between; align-items: center; color: #ffffff; font-weight: bold; font-size: 14px; margin-bottom: 12px; }
+        .hardware-row { display: flex; justify-content: space-between; align-items: center; color: #ffffff; font-weight: bold; font-size: 14px; }
         .hardware-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
-        .config-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; gap: 8px; }
-        .setting-group { display: flex; align-items: center; gap: 10px; color: #69f0ae; font-size: 14px; }
-        .encode-toggle { background: rgba(255,255,255,0.1); border: 1px solid #69f0ae; color: #69f0ae; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-weight: bold; }
-        .baud-select { background: #121212; border: 1px solid #69f0ae; color: #69f0ae; padding: 4px 6px; border-radius: 4px; font-weight: bold; outline: none; cursor: pointer; }
-        .baud-select:disabled { border-color: #37474f; color: #555555; cursor: not-allowed; background: transparent; }
-        #sync-baud-btn { background: transparent; border: 1px solid #ffd740; color: #ffd740; padding: 4px 10px; border-radius: 4px; font-size: 13px; font-weight: bold; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
-        #sync-baud-btn:disabled { color: #555555; border-color: #37474f; cursor: not-allowed; }
         .status-btn { background: transparent; border: 1px solid #ff5252; color: #ff5252; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s ease; white-space: nowrap; flex-shrink: 0; }
         .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
         .status-btn.connecting { border-color: #ffd740; color: #ffd740; }
-        .input-group { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+        
+        /* 底部輸入與按鈕列，讓所有元素置中對齊 */
+        .input-group { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 14px; }
         .input-group input { flex: 1; min-width: 80px; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px 4px; font-size: 16px; outline: none; }
         .input-group input:disabled { border-bottom: 2px solid #37474f; color: #555555; }
-        .input-group button { background: transparent; border: 1px solid #ffffff; border-radius: 4px; color: #ffffff; font-size: 14px; cursor: pointer; padding: 6px 12px; white-space: nowrap; flex-shrink: 0; }
+        
+        /* 統一底部所有控制按鈕的基礎樣式 */
+        .input-group button { background: transparent; border: 1px solid #ffffff; border-radius: 4px; color: #ffffff; font-size: 14px; cursor: pointer; padding: 6px 12px; white-space: nowrap; flex-shrink: 0; font-weight: bold; }
         .input-group button:disabled { color: #555555; border-color: #37474f; cursor: not-allowed; }
+        
+        /* 獨立按鈕顏色識別 */
+        #encode-btn { border-color: #69f0ae; color: #69f0ae; }
         #clear-btn { color: #ffb74d; border-color: #ffb74d; } 
-        #send-btn { color: #69f0ae; border-color: #69f0ae; }
+        #send-btn { color: #4fc3f7; border-color: #4fc3f7; }
+
         .menu-section { padding: 0 12px; margin-bottom: 8px; }
         .menu-title { color: #aaaaaa; font-size: 14px; margin-bottom: 6px; }
         .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 180px; overflow-y: auto; contain: content; }
         .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; text-align: left; font-size: 13px; font-family: monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .menu-grid button:active { background-color: #333333; }
+        
         .console-section { flex: 1; margin: 0 12px 12px 12px; display: flex; flex-direction: column; overflow: hidden; }
         .console-title { color: #aaaaaa; font-size: 14px; margin-bottom: 4px; }
         .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; line-height: 1.4; overflow-y: scroll; white-space: pre-wrap; word-break: break-all; -webkit-overflow-scrolling: touch; }
@@ -56,24 +58,9 @@
             <button class="status-btn" id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
         </div>
         
-        <div class="config-row">
-            <div class="setting-group">
-                <span>編碼：<button class="encode-toggle" id="encode-btn" onclick="toggleEncoding()">ASCII</button></span>
-                <span>Baud：
-                    <select class="baud-select" id="baud-rate-select" onchange="handleBaudChange()">
-                        <option value="9600">9600</option>
-                        <option value="19200">19200</option>
-                        <option value="38400">38400</option>
-                        <option value="57600" selected>57600</option>
-                        <option value="115200">115200</option>
-                    </select>
-                </span>
-            </div>
-            <button id="sync-baud-btn" onclick="syncHardwareBaud()" disabled>同步Baud</button>
-        </div>
-        
         <div class="input-group">
             <input type="text" id="cmd-input" placeholder="請先連接硬體..." disabled>
+            <button id="encode-btn" onclick="toggleEncoding()">ASCII</button>
             <button id="clear-btn" onclick="clearConsole()">清除</button>
             <button id="send-btn" onclick="sendManualCmd()" disabled>傳送</button>
         </div>
@@ -103,12 +90,10 @@
         const terminalBox = document.getElementById('terminal-box');
         const menuGrid = document.getElementById('ui-menu-grid');
         const encodeBtn = document.getElementById('encode-btn');
-        const baudSelect = document.getElementById('baud-rate-select');
         const connStatus = document.getElementById('conn-status');
         const hardwareId = document.getElementById('hardware-id');
         const cmdInput = document.getElementById('cmd-input');
         const sendBtn = document.getElementById('send-btn');
-        const syncBaudBtn = document.getElementById('sync-baud-btn');
         const menuPlaceholder = document.getElementById('menu-placeholder');
         
         let menuRawLines = [];
@@ -123,10 +108,6 @@
         let g_txCharacteristic = null;
         let dataBuffer = ""; 
 
-        function handleBaudChange() {
-            appendLogToTerminal(`[設定提示]: 目標波特率已選定為 ${baudSelect.value}。`);
-        }
-
         async function handleConnectionClick() {
             if (!isConnected) {
                 await connectToHardware();
@@ -138,20 +119,23 @@
         async function connectToHardware() {
             try {
                 if (!navigator.bluetooth) {
-                    alert("【環境不支援藍牙】\n1. 請確保網址開頭是 https://\n2. iOS 請使用 Bluefy 瀏覽器開啟！");
+                    alert("【環境不支援藍牙】\n1. 請確保網址開頭是 https://\n2. iOS 請使用 Bluefy 或 WebBLE 瀏覽器開啟！");
                     resetConnectionUi();
                     return;
                 }
 
-                baudSelect.disabled = true;
                 connStatus.innerText = "[連線中...]";
                 connStatus.className = "status-btn connecting";
                 hardwareId.innerText = "線材識別：啟動瀏覽器藍牙搜尋...";
                 appendLogToTerminal(`[系統]: 正在呼叫網頁藍牙組件...`);
 
-                // 🌟 修正點：改為最放鬆的盲搜模式，完全不篩選任何條件
                 g_device = await navigator.bluetooth.requestDevice({
-                    acceptAllDevices: true
+                    acceptAllDevices: true,
+                    optionalServices: [
+                        '0000ff00-0000-1000-8000-00805f9b34fb', 
+                        '0000ffe0-0000-1000-8000-00805f9b34fb',
+                        '0000fee7-0000-1000-8000-00805f9b34fb'
+                    ]
                 });
 
                 if (!g_device) {
@@ -166,7 +150,6 @@
                 g_gattServer = await g_device.gatt.connect();
                 appendLogToTerminal(`[系統]: 連線成功，正在探索序列埠服務...`);
 
-                // 🌟 盲搜模式連線後，動態抓取硬體第一個可用的服務
                 const services = await g_gattServer.getPrimaryServices();
                 if(services.length === 0) {
                     throw new Error("找不到任何有效的 GATT 服務");
@@ -195,9 +178,8 @@
                 hardwareId.innerText = `已連接: ${g_device.name || '序列埠設備'}`;
                 
                 cmdInput.disabled = false;
-                cmdInput.placeholder = "請輸入指令 (例如: BAUD=?)";
+                cmdInput.placeholder = "請輸入指令 (例如: AT)";
                 sendBtn.disabled = false;
-                syncBaudBtn.disabled = false; 
                 menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
 
                 g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
@@ -214,7 +196,6 @@
             } catch (error) {
                 console.error(error);
                 
-                // 增加防呆：如果是使用者自己手動取消，不要跳討厭的彈窗
                 if (error.name === 'NotFoundError' || error.message.includes('cancel')) {
                     appendLogToTerminal("[系統]: 使用者取消了藍牙搜尋。");
                     resetConnectionUi();
@@ -231,8 +212,6 @@
             connStatus.innerText = "[未連線]";
             connStatus.className = "status-btn";
             hardwareId.innerText = "線材識別：等待網頁藍牙連線...";
-            baudSelect.disabled = false;
-            syncBaudBtn.disabled = true;
         }
 
         function onDeviceDisconnected() {
@@ -240,14 +219,6 @@
             resetConnectionUi();
             cmdInput.disabled = true;
             sendBtn.disabled = true;
-        }
-
-        async function syncHardwareBaud() {
-            if (!isConnected) return;
-            const targetBaud = baudSelect.value;
-            appendLogToTerminal(`[系統]: 正在向 BLE232 發送波特率變更指令...`);
-            await sendBle232RawCmd(`BAUD=${targetBaud}`);
-            appendLogToTerminal(`[提示]: 已發送 BAUD=${targetBaud}，請確認控制台是否回傳 'OK'。`);
         }
 
         async function sendBle232RawCmd(cmdText) {
