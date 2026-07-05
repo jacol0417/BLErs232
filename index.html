@@ -190,6 +190,10 @@
                     //  優化後的寫法：
                     appendLogToTerminal(`[系統]: 藍牙序列埠通道建立完畢，已準備就緒！`);
 
+                    // ✨ 針對設備特性優化：自動發送一次空指令（敲門），喚醒設備並要求它吐出功能選單
+                    appendLogToTerminal(`[系統]: 正在嘗試喚醒設備選單...`);
+                    await sendBle232RawCmd("");
+
             } catch (error) {
                 console.error(error);
                 
@@ -273,11 +277,13 @@
             isMenuParsed = false;
             menuRawLines = [];
             if (isConnected) {
-                menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，等待硬體下一筆選單數據...</div>';
+                menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，正在重新呼叫選單...</div>';
+                // ✨ 清除畫面時，順便重新敲門，讓選單再次顯示
+                sendBle232RawCmd(""); 
             } else {
                 menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
             }
-            appendLogToTerminal("[系統]: 畫面與暫存選單已清除。");
+            appendLogToTerminal("[系統]: 畫面與暫存選單已清除並重新偵測。");
         }
 
         function handleRawChunk(chunk) {
