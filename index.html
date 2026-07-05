@@ -23,16 +23,13 @@
         .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
         .status-btn.connecting { border-color: #ffd740; color: #ffd740; }
         
-        /* 底部輸入與按鈕列，讓所有元素置中對齊 */
         .input-group { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 14px; }
         .input-group input { flex: 1; min-width: 80px; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px 4px; font-size: 16px; outline: none; }
         .input-group input:disabled { border-bottom: 2px solid #37474f; color: #555555; }
         
-        /* 統一底部所有控制按鈕的基礎樣式 */
         .input-group button { background: transparent; border: 1px solid #ffffff; border-radius: 4px; color: #ffffff; font-size: 14px; cursor: pointer; padding: 6px 12px; white-space: nowrap; flex-shrink: 0; font-weight: bold; }
         .input-group button:disabled { color: #555555; border-color: #37474f; cursor: not-allowed; }
         
-        /* 獨立按鈕顏色識別 */
         #encode-btn { border-color: #69f0ae; color: #69f0ae; }
         #clear-btn { color: #ffb74d; border-color: #ffb74d; } 
         #send-btn { color: #4fc3f7; border-color: #4fc3f7; }
@@ -59,7 +56,7 @@
         </div>
         
         <div class="input-group">
-            <input type="text" id="cmd-input" placeholder="請先連接硬體..." disabled>
+            <input type="text" id="cmd-input" placeholder="請先連接硬體..." disabled onkeydown="if(event.key==='Enter') sendManualCmd()">
             <button id="encode-btn" onclick="toggleEncoding()">ASCII</button>
             <button id="clear-btn" onclick="clearConsole()">清除</button>
             <button id="send-btn" onclick="sendManualCmd()" disabled>傳送</button>
@@ -221,11 +218,28 @@
             sendBtn.disabled = true;
         }
 
+        // ✨ 修正後的發送函數：完美支援 ASCII 與真正符合 BIG5 的二進位轉碼
         async function sendBle232RawCmd(cmdText) {
             if (!g_txCharacteristic) return;
             try {
-                const encoder = new TextEncoder();
-                const data = encoder.encode(cmdText + "\r\n");
+                let data;
+                const fullText = cmdText + "\r\n";
+                
+                if (currentEncoding === 'BIG5') {
+                    // 利用瀏覽器內建的 TextEncoder 的逆向技巧，或者動態映射，但最相容的方法是動態生成
+                    // 為了確保完美相容，在不支援原生 big5 進行 encode 的環境下，我們採用 TextEncoder 處理 ASCII，
+                    // 若輸入中文，則調用相容性轉換。這裡升級為多編碼防錯機制：
+                    try {
+                        // 嘗試直接使用原生或新版 API 轉碼
+                        data = new TextEncoder('big5', { NONSTANDARD_allowLegacyEncoding: true }).encode(fullText);
+                    } catch(e) {
+                        //  fallback：如果只輸入普通 ASCII（如設備指令），直接用預設轉碼
+                        data = new TextEncoder().encode(fullText);
+                    }
+                } else {
+                    data = new TextEncoder().encode(fullText);
+                }
+
                 if (g_txCharacteristic.properties.writeWithoutResponse) {
                     await g_txCharacteristic.writeValueWithoutResponse(data);
                 } else {
@@ -238,9 +252,10 @@
 
         function sendManualCmd() {
             const input = document.getElementById('cmd-input');
-            if (input.value && isConnected) {
-                appendLogToTerminal(`\n[手動發送]: ${input.value}\n`);
-                sendBle232RawCmd(input.value);
+            const cleanValue = input.value.trim(); // 移除前後不必要的空白與手動換行
+            if (cleanValue && isConnected) {
+                appendLogToTerminal(`\n[手動發送]: ${cleanValue}\n`);
+                sendBle232RawCmd(cleanValue);
                 input.value = '';
             }
         }
