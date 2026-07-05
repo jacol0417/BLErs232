@@ -218,35 +218,23 @@
             sendBtn.disabled = true;
         }
 
-        // ✨ 修正後的發送函數：完美支援 ASCII 與真正符合 BIG5 的二進位轉碼
+        // ✨ 既然設備端只吃 ASCII，發送時回歸最穩定的純淨編碼，拒絕雜訊
         async function sendBle232RawCmd(cmdText) {
             if (!g_txCharacteristic) return;
             try {
-                let data;
                 const fullText = cmdText + "\r\n";
-                
-                if (currentEncoding === 'BIG5') {
-                    // 利用瀏覽器內建的 TextEncoder 的逆向技巧，或者動態映射，但最相容的方法是動態生成
-                    // 為了確保完美相容，在不支援原生 big5 進行 encode 的環境下，我們採用 TextEncoder 處理 ASCII，
-                    // 若輸入中文，則調用相容性轉換。這裡升級為多編碼防錯機制：
-                    try {
-                        // 嘗試直接使用原生或新版 API 轉碼
-                        data = new TextEncoder('big5', { NONSTANDARD_allowLegacyEncoding: true }).encode(fullText);
-                    } catch(e) {
-                        //  fallback：如果只輸入普通 ASCII（如設備指令），直接用預設轉碼
-                        data = new TextEncoder().encode(fullText);
-                    }
-                } else {
-                    data = new TextEncoder().encode(fullText);
-                }
+        
+        // 統一轉成標準數據流（對於英文、數字、AT指令，TextEncoder轉出來就是標準的 ASCII Byte）
+        const encoder = new TextEncoder();
+        const data = encoder.encode(fullText);
 
-                if (g_txCharacteristic.properties.writeWithoutResponse) {
-                    await g_txCharacteristic.writeValueWithoutResponse(data);
-                } else {
-                    await g_txCharacteristic.writeValueWithResponse(data);
-                }
-            } catch (error) {
-                appendLogToTerminal(`[指令發送失敗]: ${error.message}`);
+        if (g_txCharacteristic.properties.writeWithoutResponse) {
+            await g_txCharacteristic.writeValueWithoutResponse(data);
+        } else {
+            await g_txCharacteristic.writeValueWithResponse(data);
+        }
+         } catch (error) {
+        appendLogToTerminal(`[指令發送失敗]: ${error.message}`);
             }
         }
 
