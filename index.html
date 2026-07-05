@@ -175,7 +175,7 @@
                 hardwareId.innerText = `已連接: ${g_device.name || '序列埠設備'}`;
                 
                 cmdInput.disabled = false;
-                cmdInput.placeholder = "請輸入指令 (例如: AT)";
+                cmdInput.placeholder = "請輸入指令...";
                 sendBtn.disabled = false;
                 menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
 
@@ -187,8 +187,8 @@
                     handleRawChunk(chunk);
                 });
 
-                appendLogToTerminal(`[系統]: 通道建立完畢！自動發送 'AT' 測試連線...`);
-                await sendBle232RawCmd("AT");
+                    //  優化後的寫法：
+                    appendLogToTerminal(`[系統]: 藍牙序列埠通道建立完畢，已準備就緒！`);
 
             } catch (error) {
                 console.error(error);
