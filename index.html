@@ -281,17 +281,21 @@
         }
 
         function processIncomingLine(line) {
-            const trimmedLine = line.trim();
-            if (!trimmedLine) return;
+            // ✨ 核心優化：利用正則表達式過濾掉 VT100 / ANSI Escape 序列（例如 \x1b[2J、\x1b[1;1H 等控制碼）
+            // 這樣才能確保選單比對時，字串開頭是乾淨的 (1) 或 1.
+            const cleanLine = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
+            if (!cleanLine) return;
 
-            appendLogToTerminal(line);
+            // 在控制台顯示過濾後的乾淨文字，排版會變得極度舒適
+            appendLogToTerminal(cleanLine);
 
-            const isMenuPattern = /^\(\d+\)|^\d+\./.test(trimmedLine);
+            // 使用脫去 VT100 外衣的乾淨字串進行選單判定
+            const isMenuPattern = /^\(\d+\)|^\d+\./.test(cleanLine);
 
             if (isMenuPattern) {
                 if (!isMenuParsed) {
-                    if (!menuRawLines.includes(trimmedLine)) {
-                        menuRawLines.push(trimmedLine);
+                    if (!menuRawLines.includes(cleanLine)) {
+                        menuRawLines.push(cleanLine);
                     }
                     clearTimeout(window.menuRenderTimer);
                     window.menuRenderTimer = setTimeout(() => {
