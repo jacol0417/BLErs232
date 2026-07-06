@@ -1,33 +1,343 @@
-const CACHE_NAME = 'ac-reset-v2';
-const ASSETS = [
-  'index.html',
-  'manifest.json'
-];
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>空調系統重置</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <style>
+        body {
+            margin: 0; padding: 0; background-color: #121212; color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+        }
+        .header { background-color: #004d40; color: #ffffff; text-align: center; padding: 12px 0; font-size: 20px; font-weight: bold; letter-spacing: 2px; }
+        .control-panel { background-color: #0d47a1; margin: 12px; padding: 14px; border-radius: 8px; }
+        .hardware-row { display: flex; justify-content: space-between; align-items: center; color: #ffffff; font-weight: bold; font-size: 14px; }
+        .hardware-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
+        .status-btn { background: transparent; border: 1px solid #ff5252; color: #ff5252; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s ease; white-space: nowrap; flex-shrink: 0; }
+        .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
+        .status-btn.connecting { border-color: #ffd740; color: #ffd740; }
+        
+        .input-group { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 14px; }
+        .input-group input { flex: 1; min-width: 80px; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px 4px; font-size: 16px; outline: none; }
+        .input-group input:disabled { border-bottom: 2px solid #37474f; color: #555555; }
+        
+        .input-group button { background: transparent; border: 1px solid #ffffff; border-radius: 4px; color: #ffffff; font-size: 14px; cursor: pointer; padding: 6px 12px; white-space: nowrap; flex-shrink: 0; font-weight: bold; }
+        .input-group button:disabled { color: #555555; border-color: #37474f; cursor: not-allowed; }
+        
+        #encode-btn { border-color: #69f0ae; color: #69f0ae; }
+        #clear-btn { color: #ffb74d; border-color: #ffb74d; } 
+        #send-btn { color: #4fc3f7; border-color: #4fc3f7; }
 
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS);
-    }).then(() => self.skipWaiting())
-  );
-});
+        .menu-section { padding: 0 12px; margin-bottom: 8px; }
+        .menu-title { color: #aaaaaa; font-size: 14px; margin-bottom: 6px; }
+        .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 180px; overflow-y: auto; contain: content; }
+        .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; text-align: left; font-size: 13px; font-family: monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .menu-grid button:active { background-color: #333333; }
+        
+        .console-section { flex: 1; margin: 0 12px 12px 12px; display: flex; flex-direction: column; overflow: hidden; }
+        .console-title { color: #aaaaaa; font-size: 14px; margin-bottom: 4px; }
+        .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; line-height: 1.4; overflow-y: scroll; white-space: pre-wrap; word-break: break-all; -webkit-overflow-scrolling: touch; }
+    </style>
+</head>
+<body>
 
-self.addEventListener('activate', (e) => {
-  e.waitUntil(
-    caches.keys().then((keys) => {
-      return Promise.all(
-        keys.map((key) => {
-          if (key !== CACHE_NAME) return caches.delete(key);
-        })
-      );
-    })
-  );
-});
+    <div class="header">空調系統重置</div>
 
-self.addEventListener('fetch', (e) => {
-  e.respondWith(
-    caches.match(e.request).then((cachedResponse) => {
-      return cachedResponse || fetch(e.request);
-    })
-  );
-});
+    <div class="control-panel">
+        <div class="hardware-row">
+            <div class="hardware-title" id="hardware-id">線材識別：等待網頁藍牙連線...</div>
+            <button class="status-btn" id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
+        </div>
+        
+        <div class="input-group">
+            <input type="text" id="cmd-input" placeholder="請先連接硬體..." disabled onkeydown="if(event.key==='Enter') sendManualCmd()">
+            <button id="encode-btn" onclick="toggleEncoding()">ASCII</button>
+            <button id="clear-btn" onclick="clearConsole()">清除</button>
+            <button id="send-btn" onclick="sendManualCmd()" disabled>傳送</button>
+        </div>
+    </div>
+
+    <div class="menu-section">
+        <div class="menu-title">功能選單 (解析自硬體訊號，點擊即傳送)</div>
+        <div class="menu-grid" id="ui-menu-grid">
+            <div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>
+        </div>
+    </div>
+
+    <div class="console-section">
+        <div class="console-title">接收控制台 (原始資料流)</div>
+        <div class="terminal" id="terminal-box"></div>
+    </div>
+
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js')
+                    .then(reg => console.log('PWA 離線快取啟用！', reg))
+                    .catch(err => console.error('PWA 註冊失敗：', err));
+            });
+        }
+
+        const terminalBox = document.getElementById('terminal-box');
+        const menuGrid = document.getElementById('ui-menu-grid');
+        const encodeBtn = document.getElementById('encode-btn');
+        const connStatus = document.getElementById('conn-status');
+        const hardwareId = document.getElementById('hardware-id');
+        const cmdInput = document.getElementById('cmd-input');
+        const sendBtn = document.getElementById('send-btn');
+        const menuPlaceholder = document.getElementById('menu-placeholder');
+        
+        let menuRawLines = [];
+        let isMenuParsed = false;
+        let maxLogLines = 200; 
+        let currentEncoding = 'ASCII';
+        let isConnected = false;
+        
+        let g_device = null;
+        let g_gattServer = null;
+        let g_rxCharacteristic = null;
+        let g_txCharacteristic = null;
+        let dataBuffer = ""; 
+
+        async function handleConnectionClick() {
+            if (!isConnected) {
+                await connectToHardware();
+            } else {
+                await disconnectHardware();
+            }
+        }
+
+        async function connectToHardware() {
+            try {
+                if (!navigator.bluetooth) {
+                    alert("【環境不支援藍牙】\n1. 請確保網址開頭是 https://\n2. iOS 請使用 Bluefy 或 WebBLE 瀏覽器開啟！");
+                    resetConnectionUi();
+                    return;
+                }
+
+                connStatus.innerText = "[連線中...]";
+                connStatus.className = "status-btn connecting";
+                hardwareId.innerText = "線材識別：啟動瀏覽器藍牙搜尋...";
+                appendLogToTerminal(`[系統]: 正在呼叫網頁藍牙組件...`);
+
+                g_device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: [
+                        '0000ffe0-0000-1000-8000-00805f9b34fb'
+                    ]
+                });
+
+                if (!g_device) {
+                    alert("您取消了藍牙選擇視窗");
+                    resetConnectionUi();
+                    return;
+                }
+
+                hardwareId.innerText = `已選取: ${g_device.name || '未命名裝置'}`;
+                appendLogToTerminal(`[系統]: 正在建立 GATT 連線...`);
+                
+                g_gattServer = await g_device.gatt.connect();
+                appendLogToTerminal(`[系統]: 連線成功，正在精準鎖定透傳服務...`);
+
+                // 🎯 精準指名道姓抓取 ffe0 服務
+                const targetService = await g_gattServer.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
+                
+                // 🎯 精準抓取 ffe1 特徵值
+                const characteristic = await targetService.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
+                
+                g_rxCharacteristic = characteristic;
+                g_txCharacteristic = characteristic;
+
+                isConnected = true;
+                connStatus.innerText = "[已連線]";
+                connStatus.className = "status-btn connected";
+                hardwareId.innerText = `已連接: ${g_device.name || '序列埠設備'}`;
+                
+                cmdInput.disabled = false;
+                cmdInput.placeholder = "請輸入空調控制指令...";
+                sendBtn.disabled = false;
+                menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
+
+                g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
+                
+                // 開啟監聽
+                await g_rxCharacteristic.startNotifications();
+                g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+                    let value = event.target.value;
+                    let chunk = decodeDataView(value);
+                    handleRawChunk(chunk);
+                });
+
+                appendLogToTerminal(`[系統]: 藍牙序列埠通道建立完畢，已準備就緒！`);
+
+                // 🚀 自動發送 Enter 敲門，要求 57600 速率下的空調主板吐出選單
+                appendLogToTerminal(`[系統]: 正在嘗試喚醒設備選單...`);
+                await sendBle232RawCmd("");
+
+            } catch (error) {
+                console.error(error);
+                
+                if (error.name === 'NotFoundError' || error.message.includes('cancel')) {
+                    appendLogToTerminal("[系統]: 使用者取消了藍牙搜尋。");
+                    resetConnectionUi();
+                    return;
+                }
+
+                alert("【藍牙啟動失敗】:\n" + (error.message || error));
+                resetConnectionUi();
+            }
+        }
+
+        function resetConnectionUi() {
+            isConnected = false;
+            connStatus.innerText = "[未連線]";
+            connStatus.className = "status-btn";
+            hardwareId.innerText = "線材識別：等待網頁藍牙連線...";
+        }
+
+        function onDeviceDisconnected() {
+            appendLogToTerminal("\n[警報]: 藍牙連線已從硬體端斷開！\n");
+            resetConnectionUi();
+            cmdInput.disabled = true;
+            sendBtn.disabled = true;
+        }
+
+        // 發送端保持純淨 ASCII 流，拒絕亂碼干擾
+        async function sendBle232RawCmd(cmdText) {
+            if (!g_txCharacteristic) return;
+            try {
+                const fullText = cmdText + "\r\n";
+                const encoder = new TextEncoder();
+                const data = encoder.encode(fullText);
+
+                if (g_txCharacteristic.properties.writeWithoutResponse) {
+                    await g_txCharacteristic.writeValueWithoutResponse(data);
+                } else {
+                    await g_txCharacteristic.writeValueWithResponse(data);
+                }
+            } catch (error) {
+                appendLogToTerminal(`[指令發送失敗]: ${error.message}`);
+            }
+        }
+
+        function sendManualCmd() {
+            const input = document.getElementById('cmd-input');
+            const cleanValue = input.value.trim();
+            if (cleanValue && isConnected) {
+                appendLogToTerminal(`\n[手動發送]: ${cleanValue}\n`);
+                sendBle232RawCmd(cleanValue);
+                input.value = '';
+            }
+        }
+
+        function executeCommand(cmdNum) {
+            if (!isConnected) return;
+            appendLogToTerminal(`\n[WebApp 選單指令]: ${cmdNum}\n`);
+            sendBle232RawCmd(cmdNum);
+        }
+
+        async function disconnectHardware() {
+            if (g_device && g_device.gatt.connected) {
+                g_device.gatt.disconnect();
+            }
+            isConnected = false;
+            isMenuParsed = false;
+            menuRawLines = [];
+            dataBuffer = "";
+            resetConnectionUi();
+
+            menuGrid.innerHTML = '<div style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
+            appendLogToTerminal("\n[系統]: 已安全斷開藍牙序列埠連線。\n");
+        }
+
+        function clearConsole() {
+            terminalBox.innerHTML = '';
+            isMenuParsed = false;
+            menuRawLines = [];
+            if (isConnected) {
+                menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，正在重新呼叫選單...</div>';
+                sendBle232RawCmd(""); 
+            } else {
+                menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
+            }
+            appendLogToTerminal("[系統]: 畫面與暫存選單已清除並重新偵測。");
+        }
+
+        function handleRawChunk(chunk) {
+            dataBuffer += chunk;
+            if (dataBuffer.includes('\n')) {
+                let lines = dataBuffer.split('\n');
+                dataBuffer = lines.pop(); 
+                lines.forEach(line => {
+                    processIncomingLine(line);
+                });
+            }
+        }
+
+        function processIncomingLine(line) {
+            const trimmedLine = line.trim();
+            if (!trimmedLine) return;
+
+            appendLogToTerminal(line);
+
+            const isMenuPattern = /^\(\d+\)|^\d+\./.test(trimmedLine);
+
+            if (isMenuPattern) {
+                if (!isMenuParsed) {
+                    if (!menuRawLines.includes(trimmedLine)) {
+                        menuRawLines.push(trimmedLine);
+                    }
+                    clearTimeout(window.menuRenderTimer);
+                    window.menuRenderTimer = setTimeout(() => {
+                        renderUiMenu(menuRawLines);
+                        isMenuParsed = true; 
+                    }, 250); 
+                }
+            }
+        }
+
+        function renderUiMenu(lines) {
+            menuGrid.innerHTML = ''; 
+            lines.forEach(line => {
+                const match = line.match(/\d+/);
+                const cmdNumber = match ? match[0] : '';
+
+                const btn = document.createElement('button');
+                btn.innerText = line;
+                btn.onclick = () => {
+                    executeCommand(cmdNumber);
+                };
+                menuGrid.appendChild(btn);
+            });
+        }
+
+        function decodeDataView(dataView) {
+            const encodingMode = currentEncoding === 'BIG5' ? 'big5' : 'ascii';
+            const decoder = new TextDecoder(encodingMode);
+            return decoder.decode(dataView);
+        }
+
+        function toggleEncoding() {
+            currentEncoding = currentEncoding === 'ASCII' ? 'BIG5' : 'ASCII';
+            encodeBtn.innerText = currentEncoding;
+            appendLogToTerminal(`\n[系統通知]: 已將解碼編碼變更為 ${currentEncoding}\n`);
+        }
+
+        function appendLogToTerminal(text) {
+            const p = document.createElement('div');
+            p.innerText = text;
+            terminalBox.appendChild(p);
+            if (terminalBox.children.length > maxLogLines) {
+                terminalBox.removeChild(terminalBox.firstChild);
+            }
+            terminalBox.scrollTop = terminalBox.scrollHeight;
+        }
+    </script>
+</body>
+</html>
