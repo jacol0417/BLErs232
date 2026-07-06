@@ -154,26 +154,7 @@
                 g_rxCharacteristic = characteristic;
                 g_txCharacteristic = characteristic;
 
-                // 🔥【修改後的穩健版】
-                appendLogToTerminal(`[系統]: 正在嘗試同步藍牙頻率...`);
-                try {
-                    const encoder = new TextEncoder();
-                    const baudCmd = encoder.encode("AT+BAUD1\r\n");
-                    
-                    // 改用檢查屬性的方式，避免呼叫不支援的函式
-                    if (g_txCharacteristic.properties.writeWithoutResponse) {
-                        await g_txCharacteristic.writeValueWithoutResponse(baudCmd);
-                    } else {
-                        await g_txCharacteristic.writeValueWithResponse(baudCmd);
-                    }
-                    
-                    await new Promise(resolve => setTimeout(resolve, 300)); // 稍微拉長等待時間
-                    appendLogToTerminal(`[系統]: 頻率同步指令已送出。`);
-                } catch (e) {
-                    // 即使改頻失敗，也不要讓程式崩潰，繼續執行後續動作
-                    appendLogToTerminal(`[系統警告]: 頻率同步指令發送失敗，嘗試繼續連線...`);
-                }
-
+                
                 isConnected = true;
                 connStatus.innerText = "[已連線]";
                 connStatus.className = "status-btn connected";
