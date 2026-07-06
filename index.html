@@ -154,18 +154,25 @@
                 g_rxCharacteristic = characteristic;
                 g_txCharacteristic = characteristic;
 
-                / ================================================================
-                // 🔥【方案一：插入強制改頻率指令】
-                // 在開始通知前，先強制將 JDY-23 軟體層切換至 57600
-                // ================================================================
-                appendLogToTerminal(`[系統]: 正在強制同步藍牙頻率至 57600...`);
-                const encoder = new TextEncoder();
-                const baudCmd = encoder.encode("AT+BAUD1\r\n"); // 傳送切換指令
-                await g_txCharacteristic.writeValueWithoutResponse(baudCmd);
-                
-                // 延遲 200ms 等待晶片反應，此時空調主板吐出的資料已經對齊了
-                await new Promise(resolve => setTimeout(resolve, 200)); 
-                // ================================================================
+                // 🔥【修改後的穩健版】
+                appendLogToTerminal(`[系統]: 正在嘗試同步藍牙頻率...`);
+                try {
+                    const encoder = new TextEncoder();
+                    const baudCmd = encoder.encode("AT+BAUD1\r\n");
+                    
+                    // 改用檢查屬性的方式，避免呼叫不支援的函式
+                    if (g_txCharacteristic.properties.writeWithoutResponse) {
+                        await g_txCharacteristic.writeValueWithoutResponse(baudCmd);
+                    } else {
+                        await g_txCharacteristic.writeValueWithResponse(baudCmd);
+                    }
+                    
+                    await new Promise(resolve => setTimeout(resolve, 300)); // 稍微拉長等待時間
+                    appendLogToTerminal(`[系統]: 頻率同步指令已送出。`);
+                } catch (e) {
+                    // 即使改頻失敗，也不要讓程式崩潰，繼續執行後續動作
+                    appendLogToTerminal(`[系統警告]: 頻率同步指令發送失敗，嘗試繼續連線...`);
+                }
 
                 isConnected = true;
                 connStatus.innerText = "[已連線]";
