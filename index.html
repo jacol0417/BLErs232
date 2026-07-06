@@ -129,9 +129,7 @@
                 g_device = await navigator.bluetooth.requestDevice({
                     acceptAllDevices: true,
                     optionalServices: [
-                        '0000ff00-0000-1000-8000-00805f9b34fb', 
-                        '0000ffe0-0000-1000-8000-00805f9b34fb',
-                        '0000fee7-0000-1000-8000-00805f9b34fb'
+                        '0000ffe0-0000-1000-8000-00805f9b34fb'
                     ]
                 });
 
@@ -145,29 +143,17 @@
                 appendLogToTerminal(`[系統]: 正在建立 GATT 連線...`);
                 
                 g_gattServer = await g_device.gatt.connect();
-                appendLogToTerminal(`[系統]: 連線成功，正在探索序列埠服務...`);
+                appendLogToTerminal(`[系統]: 連線成功，正在精準鎖定透傳服務...`);
 
-                const services = await g_gattServer.getPrimaryServices();
-                if(services.length === 0) {
-                    throw new Error("找不到任何有效的 GATT 服務");
-                }
+                // 🎯 修正：不猜測第一個服務，直接精準指定 JDY-23 的 ffe0 透傳服務
+                const targetService = await g_gattServer.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
                 
-                let targetService = services[0];
-                const characteristics = await targetService.getCharacteristics();
+                // 🎯 修正：直接取得傳輸數據專用的 ffe1 特徵值
+                const characteristic = await targetService.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
                 
-                for (let char of characteristics) {
-                    if (char.properties.notify || char.properties.indicate) {
-                        g_rxCharacteristic = char;
-                    }
-                    if (char.properties.write || char.properties.writeWithoutResponse) {
-                        g_txCharacteristic = char;
-                    }
-                }
-
-                if (!g_rxCharacteristic || !g_txCharacteristic) {
-                    g_rxCharacteristic = characteristics[0];
-                    g_txCharacteristic = characteristics[0];
-                }
+                // 讀與寫都完美綁定在此特徵值
+                g_rxCharacteristic = characteristic;
+                g_txCharacteristic = characteristic;
 
                 isConnected = true;
                 connStatus.innerText = "[已連線]";
@@ -175,11 +161,13 @@
                 hardwareId.innerText = `已連接: ${g_device.name || '序列埠設備'}`;
                 
                 cmdInput.disabled = false;
-                cmdInput.placeholder = "請輸入指令...";
+                cmdInput.placeholder = "請輸入空調控制指令...";
                 sendBtn.disabled = false;
                 menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
 
                 g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
+                
+                // 開啟監聽器
                 await g_rxCharacteristic.startNotifications();
                 g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
                     let value = event.target.value;
@@ -187,12 +175,11 @@
                     handleRawChunk(chunk);
                 });
 
-                    //  優化後的寫法：
-                    appendLogToTerminal(`[系統]: 藍牙序列埠通道建立完畢，已準備就緒！`);
+                appendLogToTerminal(`[系統]: 藍牙序列埠通道建立完畢，已準備就緒！`);
 
-                    // ✨ 針對設備特性優化：自動發送一次空指令（敲門），喚醒設備並要求它吐出功能選單
-                    appendLogToTerminal(`[系統]: 正在嘗試喚醒設備選單...`);
-                    await sendBle232RawCmd("");
+                // ✨ 針對設備特性優化：連線完成即發送一次空指令（敲門），叫醒設備、讓它停止發送時間戳記並秀出選單
+                appendLogToTerminal(`[系統]: 正在嘗試喚醒設備選單...`);
+                await sendBle232RawCmd("");
 
             } catch (error) {
                 console.error(error);
@@ -203,7 +190,7 @@
                     return;
                 }
 
-                alert("【藍牙啟動失敗】:\n" + (error.message || error) + "\n\n提示：請確認硬體是否處於廣播狀態。");
+                alert("【藍牙啟動失敗】:\n" + (error.message || error) + "\n\n提示：請確認硬體是否處於廣播狀態並嘗試綁定特定 UUID。");
                 resetConnectionUi();
             }
         }
@@ -222,23 +209,21 @@
             sendBtn.disabled = true;
         }
 
-        // ✨ 既然設備端只吃 ASCII，發送時回歸最穩定的純淨編碼，拒絕雜訊
+        // ✨ 精簡防錯版：發送端回歸最穩定的標準 ASCII 數據流，徹底杜絕無效編碼帶來的亂碼雜訊
         async function sendBle232RawCmd(cmdText) {
             if (!g_txCharacteristic) return;
             try {
                 const fullText = cmdText + "\r\n";
-        
-        // 統一轉成標準數據流（對於英文、數字、AT指令，TextEncoder轉出來就是標準的 ASCII Byte）
-        const encoder = new TextEncoder();
-        const data = encoder.encode(fullText);
+                const encoder = new TextEncoder();
+                const data = encoder.encode(fullText);
 
-        if (g_txCharacteristic.properties.writeWithoutResponse) {
-            await g_txCharacteristic.writeValueWithoutResponse(data);
-        } else {
-            await g_txCharacteristic.writeValueWithResponse(data);
-        }
-         } catch (error) {
-        appendLogToTerminal(`[指令發送失敗]: ${error.message}`);
+                if (g_txCharacteristic.properties.writeWithoutResponse) {
+                    await g_txCharacteristic.writeValueWithoutResponse(data);
+                } else {
+                    await g_txCharacteristic.writeValueWithResponse(data);
+                }
+            } catch (error) {
+                appendLogToTerminal(`[指令發送失敗]: ${error.message}`);
             }
         }
 
@@ -278,7 +263,7 @@
             menuRawLines = [];
             if (isConnected) {
                 menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，正在重新呼叫選單...</div>';
-                // ✨ 清除畫面時，順便重新敲門，讓選單再次顯示
+                // ✨ 清除畫面的同時自動重新敲門，強制喚醒選單再次生成
                 sendBle232RawCmd(""); 
             } else {
                 menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
@@ -334,6 +319,7 @@
             });
         }
 
+        // 🌟 接收端保留動態解碼（解讀硬體回傳的 BIG5 中文或 ASCII 數據）
         function decodeDataView(dataView) {
             const encodingMode = currentEncoding === 'BIG5' ? 'big5' : 'ascii';
             const decoder = new TextDecoder(encodingMode);
