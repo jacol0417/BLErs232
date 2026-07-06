@@ -145,13 +145,12 @@
                 g_gattServer = await g_device.gatt.connect();
                 appendLogToTerminal(`[系統]: 連線成功，正在精準鎖定透傳服務...`);
 
-                // 🎯 修正：不猜測第一個服務，直接精準指定 JDY-23 的 ffe0 透傳服務
+                // 🎯 精準指名道姓抓取 ffe0 服務
                 const targetService = await g_gattServer.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
                 
-                // 🎯 修正：直接取得傳輸數據專用的 ffe1 特徵值
+                // 🎯 精準抓取 ffe1 特徵值
                 const characteristic = await targetService.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
                 
-                // 讀與寫都完美綁定在此特徵值
                 g_rxCharacteristic = characteristic;
                 g_txCharacteristic = characteristic;
 
@@ -167,7 +166,7 @@
 
                 g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
                 
-                // 開啟監聽器
+                // 開啟監聽
                 await g_rxCharacteristic.startNotifications();
                 g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
                     let value = event.target.value;
@@ -177,7 +176,7 @@
 
                 appendLogToTerminal(`[系統]: 藍牙序列埠通道建立完畢，已準備就緒！`);
 
-                // ✨ 針對設備特性優化：連線完成即發送一次空指令（敲門），叫醒設備、讓它停止發送時間戳記並秀出選單
+                // 🚀 自動發送 Enter 敲門，要求 57600 速率下的空調主板吐出選單
                 appendLogToTerminal(`[系統]: 正在嘗試喚醒設備選單...`);
                 await sendBle232RawCmd("");
 
@@ -190,7 +189,7 @@
                     return;
                 }
 
-                alert("【藍牙啟動失敗】:\n" + (error.message || error) + "\n\n提示：請確認硬體是否處於廣播狀態並嘗試綁定特定 UUID。");
+                alert("【藍牙啟動失敗】:\n" + (error.message || error));
                 resetConnectionUi();
             }
         }
@@ -209,7 +208,7 @@
             sendBtn.disabled = true;
         }
 
-        // ✨ 精簡防錯版：發送端回歸最穩定的標準 ASCII 數據流，徹底杜絕無效編碼帶來的亂碼雜訊
+        // 發送端保持純淨 ASCII 流，拒絕亂碼干擾
         async function sendBle232RawCmd(cmdText) {
             if (!g_txCharacteristic) return;
             try {
@@ -229,7 +228,7 @@
 
         function sendManualCmd() {
             const input = document.getElementById('cmd-input');
-            const cleanValue = input.value.trim(); // 移除前後不必要的空白與手動換行
+            const cleanValue = input.value.trim();
             if (cleanValue && isConnected) {
                 appendLogToTerminal(`\n[手動發送]: ${cleanValue}\n`);
                 sendBle232RawCmd(cleanValue);
@@ -263,7 +262,6 @@
             menuRawLines = [];
             if (isConnected) {
                 menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，正在重新呼叫選單...</div>';
-                // ✨ 清除畫面的同時自動重新敲門，強制喚醒選單再次生成
                 sendBle232RawCmd(""); 
             } else {
                 menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
@@ -319,7 +317,6 @@
             });
         }
 
-        // 🌟 接收端保留動態解碼（解讀硬體回傳的 BIG5 中文或 ASCII 數據）
         function decodeDataView(dataView) {
             const encodingMode = currentEncoding === 'BIG5' ? 'big5' : 'ascii';
             const decoder = new TextDecoder(encodingMode);
