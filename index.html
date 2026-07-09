@@ -4,23 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>空調系統重置</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
     <style>
         body { margin: 0; padding: 0; background-color: #121212; color: #ffffff; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .header { background-color: #004d40; text-align: center; padding: 12px 0; font-size: 20px; font-weight: bold; }
         .control-panel { background-color: #0d47a1; margin: 12px; padding: 14px; border-radius: 8px; }
         .input-group { display: flex; gap: 8px; margin-top: 14px; }
-        .input-group input { flex: 1; background: #000; border: 1px solid #546e7a; color: #fff; padding: 8px; border-radius: 4px; }
-        .input-group button { background: #333; color: #fff; border: 1px solid #666; padding: 8px 12px; cursor: pointer; border-radius: 4px; }
+        .input-group input { flex: 1; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px; }
+        .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 0 12px; max-height: 200px; overflow-y: auto; }
+        .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; cursor: pointer; text-align: left; }
         .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; margin: 12px; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; overflow-y: scroll; white-space: pre-wrap; }
     </style>
 </head>
 <body>
+    <div class="header">空調系統重置</div>
     <div class="control-panel">
         <button id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
         <div class="input-group">
-            <input type="text" id="cmd-input" placeholder="輸入指令...">
-            <button onclick="sendManualCmd()">發送</button>
+            <input type="text" id="cmd-input" placeholder="指令輸入..." disabled>
+            <button onclick="sendManualCmd()" id="send-btn" disabled>傳送</button>
         </div>
     </div>
+    <div class="menu-grid" id="ui-menu-grid"></div>
     <div class="terminal" id="terminal-box"></div>
 
     <script>
@@ -28,22 +37,13 @@
         let g_txCharacteristic = null;
         let dataBuffer = "";
 
-        // 【穩定的清理邏輯】確保顯示內容乾淨，且不干擾原始資料
-        function cleanAnsi(text) {
-            return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
-                       .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
-        }
-
         async function handleConnectionClick() {
             if (isConnected) { location.reload(); return; }
-            
             try {
-                // 恢復您原本成功運作的連線架構
                 const device = await navigator.bluetooth.requestDevice({
                     acceptAllDevices: true,
                     optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
                 });
-                
                 const server = await device.gatt.connect();
                 const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
                 const char = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
@@ -51,44 +51,64 @@
                 g_txCharacteristic = char;
                 isConnected = true;
                 document.getElementById('conn-status').innerText = "[已連線]";
-
+                document.getElementById('cmd-input').disabled = false;
+                document.getElementById('send-btn').disabled = false;
+                
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', (event) => {
                     let decoder = new TextDecoder('iso-8859-1');
                     let raw = decoder.decode(event.target.value);
-                    processIncomingLine(raw);
+                    handleRawData(raw);
                 });
-                
                 appendLogToTerminal("[系統]: 連線成功\n");
             } catch (e) { alert("連線失敗: " + e); }
         }
 
-        function processIncomingLine(rawText) {
-            // A. 顯示原始資料 (清理過 ANSI 後)
-            const cleanText = cleanAnsi(rawText);
-            if (cleanText) appendLogToTerminal(cleanText);
+        // --- 核心修正區：接收與解析 ---
+        function handleRawData(chunk) {
+            // 1. 清理 ANSI 代碼 (避免解析器被控制符號誤導)
+            let cleanChunk = chunk.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+            
+            // 2. 顯示原始資料流
+            appendLogToTerminal(cleanChunk);
 
-            // B. 解析選單 (不影響顯示)
-            dataBuffer += cleanText;
+            // 3. 緩衝區處理選單
+            dataBuffer += cleanChunk;
             if (dataBuffer.includes('\n')) {
                 let lines = dataBuffer.split('\n');
                 dataBuffer = lines.pop();
                 lines.forEach(line => {
-                    if (/^\(\d+\)\s+.+/.test(line.trim())) {
-                        console.log("偵測到選單:", line.trim());
+                    let trimmed = line.trim();
+                    // 精準捕捉 (數字) 格式
+                    if (/^\(\d+\)\s+.+/.test(trimmed)) {
+                        renderMenuButton(trimmed);
                     }
                 });
             }
         }
 
+        function renderMenuButton(text) {
+            const grid = document.getElementById('ui-menu-grid');
+            const match = text.match(/\((\d+)\)/);
+            if (match) {
+                const btn = document.createElement('button');
+                btn.innerText = text;
+                btn.onclick = () => sendCommand(match[1]);
+                grid.appendChild(btn);
+            }
+        }
+
         async function sendManualCmd() {
             const input = document.getElementById('cmd-input');
-            if (input.value && g_txCharacteristic) {
-                const data = new TextEncoder().encode(input.value + "\r\n");
-                await g_txCharacteristic.writeValueWithoutResponse(data);
-                appendLogToTerminal(`\n>> 發送: ${input.value}\n`);
-                input.value = '';
-            }
+            sendCommand(input.value);
+            input.value = '';
+        }
+
+        async function sendCommand(cmd) {
+            if (!g_txCharacteristic) return;
+            const data = new TextEncoder().encode(cmd + "\r\n");
+            await g_txCharacteristic.writeValueWithoutResponse(data);
+            appendLogToTerminal(`\n>> 發送: ${cmd}\n`);
         }
 
         function appendLogToTerminal(text) {
