@@ -3,38 +3,38 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>空調系統重置</title>
+    <title>空調系統控制台</title>
     
     <style>
-        body { margin: 0; padding: 0; background-color: #121212; color: #ffffff; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .header { background-color: #004d40; text-align: center; padding: 12px 0; font-size: 20px; font-weight: bold; }
+        body { margin: 0; padding: 0; background-color: #121212; color: #ffffff; font-family: monospace; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .header { background-color: #004d40; text-align: center; padding: 12px 0; font-size: 18px; font-weight: bold; }
         .control-panel { background-color: #0d47a1; margin: 12px; padding: 14px; border-radius: 8px; }
-        .input-group { display: flex; gap: 8px; margin-top: 14px; }
-        .input-group input { flex: 1; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px; }
+        .status-btn { background: transparent; border: 1px solid #ff5252; color: #ff5252; padding: 6px 12px; border-radius: 4px; cursor: pointer; width: 100%; font-weight: bold; }
+        .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
         .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 0 12px; max-height: 200px; overflow-y: auto; }
-        .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; cursor: pointer; text-align: left; }
-        .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; margin: 12px; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; overflow-y: scroll; white-space: pre-wrap; }
+        .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; cursor: pointer; text-align: left; font-size: 12px; }
+        .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; margin: 12px; padding: 8px; font-size: 12px; color: #00ff00; overflow-y: scroll; white-space: pre-wrap; }
     </style>
 </head>
 <body>
-    <div class="header">空調重置</div>
+
+    <div class="header">空調系統控制台</div>
     <div class="control-panel">
-        <button id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
-        <div class="input-group">
-            <input type="text" id="cmd-input" placeholder="指令輸入..." disabled>
-            <button onclick="sendManualCmd()" id="send-btn" disabled>傳送</button>
-        </div>
+        <button class="status-btn" id="conn-status" onclick="handleConnection()">[啟動藍牙連線]</button>
     </div>
-    <div class="menu-grid" id="ui-menu-grid"></div>
-    <div class="terminal" id="terminal-box"></div>
+
+    <div class="menu-grid" id="ui-menu-grid">
+        <div style="color: #666; grid-column: span 2; padding: 10px;">請先連線以載入選單...</div>
+    </div>
+
+    <div class="terminal" id="terminal-box">[系統]: 等待連線中...</div>
 
     <script>
-        let isConnected = false;
         let g_txCharacteristic = null;
         let dataBuffer = "";
+        let menuRawLines = [];
 
-        async function handleConnectionClick() {
-            if (isConnected) { location.reload(); return; }
+        async function handleConnection() {
             try {
                 const device = await navigator.bluetooth.requestDevice({
                     acceptAllDevices: true,
@@ -45,79 +45,70 @@
                 const char = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
                 
                 g_txCharacteristic = char;
-                isConnected = true;
                 document.getElementById('conn-status').innerText = "[已連線]";
-                document.getElementById('cmd-input').disabled = false;
-                document.getElementById('send-btn').disabled = false;
+                document.getElementById('conn-status').className = "status-btn connected";
                 
                 await char.startNotifications();
                 char.addEventListener('characteristicvaluechanged', (event) => {
-                    // 1. 使用與 Android 一致的 ISO-8859-1 編碼
+                    // 1. 採用與 Android 一致的 ISO-8859-1 編碼
                     let decoder = new TextDecoder('iso-8859-1');
-                    let raw = decoder.decode(event.target.value);
-                    handleRawData(raw);
+                    let rawData = decoder.decode(event.target.value);
+                    
+                    // 2. 移植 Android 的清理邏輯
+                    let processedText = rawData
+                        .replace(/\u001b\[2J/g, "").replace(/\u001b\[H/g, "")
+                        .replace(/\x1B\[\??[0-9;]*[a-zA-Z]/g, "")
+                        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+
+                    handleRawData(processedText);
                 });
-                appendLogToTerminal("[系統]: 連線成功\n");
             } catch (e) { alert("連線失敗: " + e); }
         }
 
-        // --- Android 移植版：數據清洗與解析 ---
         function handleRawData(chunk) {
-            // 核心過濾：移植自 Android 的 ANSI 移除邏輯
-            let cleanChunk = chunk
-                .replace(/\x1B\[\??[0-9;]*[a-zA-Z]/g, '')        // 移除所有 ANSI 控制碼
-                .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ''); // 移除不可見控制字元
-
-            // 顯示原始資料流
-            appendLogToTerminal(cleanChunk);
-
-            // 解析緩衝區邏輯
-            dataBuffer += cleanChunk;
+            dataBuffer += chunk;
             if (dataBuffer.includes('\n')) {
                 let lines = dataBuffer.split('\n');
                 dataBuffer = lines.pop();
-                lines.forEach(line => {
-                    let trimmed = line.trim();
-                    // 匹配選單格式 (1) 內容
-                    if (/^\(\d+\)\s+.+/.test(trimmed)) {
-                        renderMenuButton(trimmed);
-                    }
-                });
+                lines.forEach(line => processIncomingLine(line.trim()));
             }
         }
 
-        function renderMenuButton(text) {
-            const grid = document.getElementById('ui-menu-grid');
-            const match = text.match(/\((\d+)\)/);
-            if (match) {
-                // 避免重複產生相同按鈕
-                if (![...grid.querySelectorAll('button')].some(b => b.innerText === text)) {
-                    const btn = document.createElement('button');
-                    btn.innerText = text;
-                    btn.onclick = () => sendCommand(match[1]);
-                    grid.appendChild(btn);
+        function processIncomingLine(line) {
+            if (!line) return;
+            
+            // 顯示原始數據到終端機
+            const term = document.getElementById('terminal-box');
+            term.innerHTML += line + '<br>';
+            term.scrollTop = term.scrollHeight;
+
+            // 解析選單：針對您圖中的格式 "(數字) 內容"
+            if (/^\(\d+\)\s+.+/.test(line)) {
+                if (!menuRawLines.includes(line)) {
+                    menuRawLines.push(line);
+                    renderUiMenu(menuRawLines);
                 }
             }
         }
 
-        async function sendManualCmd() {
-            const input = document.getElementById('cmd-input');
-            sendCommand(input.value);
-            input.value = '';
+        function renderUiMenu(lines) {
+            const grid = document.getElementById('ui-menu-grid');
+            grid.innerHTML = '';
+            lines.forEach(line => {
+                const match = line.match(/\((\d+)\)/);
+                const cmd = match ? match[1] : '';
+                const btn = document.createElement('button');
+                btn.innerText = line;
+                btn.onclick = () => sendBle232RawCmd(cmd);
+                grid.appendChild(btn);
+            });
         }
 
-        async function sendCommand(cmd) {
+        async function sendBle232RawCmd(cmd) {
             if (!g_txCharacteristic) return;
-            // 確保送出的是乾淨的 ASCII 轉碼流
             const data = new TextEncoder().encode(cmd + "\r\n");
             await g_txCharacteristic.writeValueWithoutResponse(data);
-            appendLogToTerminal(`\n>> 發送: ${cmd}\n`);
-        }
-
-        function appendLogToTerminal(text) {
-            const term = document.getElementById('terminal-box');
-            term.innerHTML += text;
-            term.scrollTop = term.scrollHeight;
+            document.getElementById('terminal-box').innerHTML += `<br>> 發送: ${cmd}<br>`;
         }
     </script>
 </body>
