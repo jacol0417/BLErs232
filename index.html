@@ -3,132 +3,100 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>空調系統重置</title>
-    
-    <link rel="manifest" href="manifest.json">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    
+    <title>空調系統控制台 (穩定版)</title>
     <style>
-        body { margin: 0; padding: 0; background-color: #121212; color: #ffffff; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .header { background-color: #004d40; text-align: center; padding: 12px 0; font-size: 20px; font-weight: bold; }
-        .control-panel { background-color: #0d47a1; margin: 12px; padding: 14px; border-radius: 8px; }
-        .hardware-row { display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
-        .status-btn { background: transparent; border: 1px solid #ff5252; color: #ff5252; padding: 4px 12px; border-radius: 4px; cursor: pointer; }
-        .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
-        .input-group { display: flex; gap: 8px; margin-top: 14px; }
-        .input-group input { flex: 1; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px; }
-        .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 0 12px; max-height: 200px; overflow-y: auto; }
-        .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; cursor: pointer; text-align: left; }
-        .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; margin: 12px; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; overflow-y: scroll; white-space: pre-wrap; }
+        body { margin: 0; padding: 0; background-color: #121212; color: #ffffff; font-family: monospace; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        .control-panel { background-color: #0d47a1; padding: 12px; }
+        .input-group { display: flex; gap: 8px; margin-top: 10px; }
+        .input-group input { flex: 1; background: #000; border: 1px solid #555; color: #fff; padding: 8px; }
+        .input-group button { padding: 8px 15px; cursor: pointer; }
+        .terminal { flex: 1; overflow-y: scroll; padding: 10px; font-size: 13px; color: #00ff00; white-space: pre-wrap; background: #000; border-top: 1px solid #333; }
+        .menu-btn { display: block; width: 100%; margin: 5px 0; padding: 10px; background: #222; color: #69f0ae; border: 1px solid #444; text-align: left; }
     </style>
 </head>
 <body>
-
-    <div class="header">空調系統重置</div>
     <div class="control-panel">
-        <div class="hardware-row">
-            <div id="hardware-id">線材識別：等待網頁藍牙連線...</div>
-            <button class="status-btn" id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
-        </div>
+        <button id="conn-btn" onclick="connect()">[連接藍牙設備]</button>
         <div class="input-group">
-            <input type="text" id="cmd-input" placeholder="請先連接硬體..." disabled>
-            <button onclick="sendManualCmd()" id="send-btn" disabled>傳送</button>
+            <input type="text" id="cmd-input" placeholder="輸入指令">
+            <button onclick="sendCmd()">傳送</button>
         </div>
     </div>
-
-    <div class="menu-grid" id="ui-menu-grid">
-        <div id="menu-placeholder" style="color: #666; grid-column: span 2;">請先建立藍牙連線...</div>
-    </div>
-
-    <div class="terminal" id="terminal-box"></div>
+    <div id="menu-area"></div>
+    <div class="terminal" id="term"></div>
 
     <script>
-        let isConnected = false;
-        let g_device, g_rxCharacteristic, g_txCharacteristic;
-        let dataBuffer = "";
-        let menuRawLines = [];
+        let rxChar = null;
+        let txChar = null;
+        let buffer = "";
 
-        async function handleConnectionClick() {
-            if (!isConnected) {
-                try {
-                    g_device = await navigator.bluetooth.requestDevice({
-                        acceptAllDevices: true,
-                        optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
-                    });
-                    const server = await g_device.gatt.connect();
-                    const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
-                    const char = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
-                    
-                    g_rxCharacteristic = g_txCharacteristic = char;
-                    isConnected = true;
-                    document.getElementById('conn-status').innerText = "[已連線]";
-                    document.getElementById('conn-status').className = "status-btn connected";
-                    document.getElementById('cmd-input').disabled = false;
-                    document.getElementById('send-btn').disabled = false;
-                    
-                    await char.startNotifications();
-                    char.addEventListener('characteristicvaluechanged', (event) => {
-                        let decoder = new TextDecoder('ascii');
-                        handleRawChunk(decoder.decode(event.target.value));
-                    });
-                    appendLogToTerminal("[系統]: 連線成功，等待設備回傳選單...");
-                    await sendBle232RawCmd("");
-                } catch (e) { alert(e); }
-            } else {
-                location.reload();
+        async function connect() {
+            try {
+                const device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
+                });
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
+                const char = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
+                
+                rxChar = char;
+                txChar = char;
+                document.getElementById('conn-btn').innerText = "[已連線]";
+                
+                await rxChar.startNotifications();
+                rxChar.addEventListener('characteristicvaluechanged', (event) => {
+                    // 使用 TextDecoder 處理數據
+                    const decoder = new TextDecoder('iso-8859-1');
+                    const raw = decoder.decode(event.target.value);
+                    processData(raw);
+                });
+            } catch (e) { alert("連線錯誤: " + e); }
+        }
+
+        function processData(chunk) {
+            // 強力過濾：直接過濾所有非 ASCII 可列印字元 (除換行外)
+            // 這能確保選單解析不被 ANSI 控制碼污染
+            const clean = chunk.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+                               .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
+            
+            document.getElementById('term').innerText += clean;
+            document.getElementById('term').scrollTop = document.getElementById('term').scrollHeight;
+
+            // 選單解析：只抓取乾淨的 (數字) 格式
+            buffer += clean;
+            if (buffer.includes('\n')) {
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                lines.forEach(line => {
+                    if (/^\(\d+\)\s+.+/.test(line.trim())) {
+                        createMenuBtn(line.trim());
+                    }
+                });
             }
         }
 
-        function handleRawChunk(chunk) {
-            dataBuffer += chunk;
-            if (dataBuffer.includes('\n')) {
-                let lines = dataBuffer.split('\n');
-                dataBuffer = lines.pop();
-                lines.forEach(line => processIncomingLine(line));
-            }
+        function createMenuBtn(text) {
+            const match = text.match(/\((\d+)\)/);
+            if (!match) return;
+            // 檢查是否已存在按鈕
+            if (document.querySelector(`[data-cmd="${match[1]}"]`)) return;
+
+            const btn = document.createElement('button');
+            btn.className = "menu-btn";
+            btn.innerText = text;
+            btn.setAttribute("data-cmd", match[1]);
+            btn.onclick = () => sendCmd(match[1]);
+            document.getElementById('menu-area').appendChild(btn);
         }
 
-        function processIncomingLine(line) {
-            const cleanLine = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
-            if (!cleanLine) return;
-
-            // 無論是否匹配選單，原始內容都顯示
-            appendLogToTerminal(cleanLine);
-
-            // 匹配格式 (數字) 文字
-            if (/^\(\d+\)\s+.+/.test(cleanLine)) {
-                if (!menuRawLines.includes(cleanLine)) {
-                    menuRawLines.push(cleanLine);
-                    renderUiMenu(menuRawLines);
-                }
-            }
-        }
-
-        function renderUiMenu(lines) {
-            const grid = document.getElementById('ui-menu-grid');
-            grid.innerHTML = '';
-            lines.forEach(line => {
-                const match = line.match(/\((\d+)\)/);
-                const cmd = match ? match[1] : '';
-                const btn = document.createElement('button');
-                btn.innerText = line;
-                btn.onclick = () => sendBle232RawCmd(cmd);
-                grid.appendChild(btn);
-            });
-        }
-
-        async function sendBle232RawCmd(cmd) {
-            if (!g_txCharacteristic) return;
-            const data = new TextEncoder().encode(cmd + "\r\n");
-            await g_txCharacteristic.writeValueWithoutResponse(data);
-            appendLogToTerminal(`> 發送: ${cmd}`);
-        }
-
-        function appendLogToTerminal(text) {
-            const term = document.getElementById('terminal-box');
-            term.innerHTML += text + '\n';
-            term.scrollTop = term.scrollHeight;
+        async function sendCmd(cmd) {
+            const val = cmd || document.getElementById('cmd-input').value;
+            if (!val || !txChar) return;
+            const data = new TextEncoder().encode(val + "\r\n");
+            await txChar.writeValueWithoutResponse(data);
+            document.getElementById('term').innerText += `\n>> 發送: ${val}\n`;
+            document.getElementById('cmd-input').value = '';
         }
     </script>
 </body>
