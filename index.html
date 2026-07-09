@@ -90,14 +90,35 @@
             document.getElementById('menu-area').appendChild(btn);
         }
 
-        async function sendCmd(cmd) {
-            const val = cmd || document.getElementById('cmd-input').value;
-            if (!val || !txChar) return;
-            const data = new TextEncoder().encode(val + "\r\n");
-            await txChar.writeValueWithoutResponse(data);
-            document.getElementById('term').innerText += `\n>> 發送: ${val}\n`;
-            document.getElementById('cmd-input').value = '';
+        async function sendCommand(cmd) {
+    if (!g_txCharacteristic) {
+        appendLogToTerminal("\n[錯誤]: 藍牙尚未連接！\n");
+        return;
+    }
+
+    const data = new TextEncoder().encode(cmd + "\r\n");
+    
+    try {
+        // 強制檢查該特徵值擁有的寫入屬性
+        const props = g_txCharacteristic.properties;
+        
+        if (props.writeWithResponse) {
+            // 嘗試「有回應」寫入 (通常最穩定)
+            await g_txCharacteristic.writeValueWithResponse(data);
+            appendLogToTerminal(`\n>> 發送(Response): ${cmd}\n`);
+        } else if (props.writeWithoutResponse) {
+            // 嘗試「無回應」寫入
+            await g_txCharacteristic.writeValueWithoutResponse(data);
+            appendLogToTerminal(`\n>> 發送(NoResponse): ${cmd}\n`);
+        } else {
+            appendLogToTerminal("\n[錯誤]: 此特徵值不支援任何寫入屬性！\n");
         }
+    } catch (error) {
+        // 如果失敗，直接把錯誤訊息印出來，這是排查的核心
+        appendLogToTerminal(`\n[傳送失敗]: ${error.message}\n`);
+        console.error("BLE Write Error:", error);
+    }
+}
     </script>
 </body>
 </html>
