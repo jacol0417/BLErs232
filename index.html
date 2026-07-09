@@ -4,102 +4,98 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>空調系統重置</title>
-    
-    <link rel="manifest" href="manifest.json">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    
     <style>
-        body { margin: 0; padding: 0; background-color: #121212; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .header { background-color: #004d40; color: #ffffff; text-align: center; padding: 12px 0; font-size: 20px; font-weight: bold; letter-spacing: 2px; }
+        body { margin: 0; padding: 0; background-color: #121212; color: #ffffff; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         .control-panel { background-color: #0d47a1; margin: 12px; padding: 14px; border-radius: 8px; }
-        .hardware-row { display: flex; justify-content: space-between; align-items: center; color: #ffffff; font-weight: bold; font-size: 14px; }
-        .hardware-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
-        .status-btn { background: transparent; border: 1px solid #ff5252; color: #ff5252; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s ease; white-space: nowrap; flex-shrink: 0; }
-        .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
-        .status-btn.connecting { border-color: #ffd740; color: #ffd740; }
-        .input-group { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 14px; }
-        .input-group input { flex: 1; min-width: 80px; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px 4px; font-size: 16px; outline: none; }
-        .input-group button { background: transparent; border: 1px solid #ffffff; border-radius: 4px; color: #ffffff; font-size: 14px; cursor: pointer; padding: 6px 12px; font-weight: bold; }
-        .menu-section { padding: 0 12px; margin-bottom: 8px; }
-        .menu-title { color: #aaaaaa; font-size: 14px; margin-bottom: 6px; }
-        .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 180px; overflow-y: auto; }
-        .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; text-align: left; font-size: 13px; font-family: monospace; cursor: pointer; }
-        .console-section { flex: 1; margin: 0 12px 12px 12px; display: flex; flex-direction: column; overflow: hidden; }
-        .console-title { color: #aaaaaa; font-size: 14px; margin-bottom: 4px; }
-        .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; overflow-y: scroll; white-space: pre-wrap; }
+        .input-group { display: flex; gap: 8px; margin-top: 14px; }
+        .input-group input { flex: 1; background: #000; border: 1px solid #546e7a; color: #fff; padding: 8px; border-radius: 4px; }
+        .input-group button { background: #333; color: #fff; border: 1px solid #666; padding: 8px 12px; cursor: pointer; border-radius: 4px; }
+        .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; margin: 12px; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; overflow-y: scroll; white-space: pre-wrap; }
     </style>
 </head>
 <body>
-    <div class="header">空調系統重置</div>
     <div class="control-panel">
-        <div class="hardware-row">
-            <div class="hardware-title" id="hardware-id">線材識別：等待網頁藍牙連線...</div>
-            <button class="status-btn" id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
-        </div>
+        <button id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
         <div class="input-group">
-            <input type="text" id="cmd-input" placeholder="請先連接硬體..." disabled onkeydown="if(event.key==='Enter') sendManualCmd()">
-            <button id="encode-btn" onclick="toggleEncoding()">ASCII</button>
-            <button id="clear-btn" onclick="clearConsole()">清除</button>
-            <button id="send-btn" onclick="sendManualCmd()" disabled>傳送</button>
+            <input type="text" id="cmd-input" placeholder="輸入指令...">
+            <button onclick="sendManualCmd()">發送</button>
         </div>
     </div>
-    <div class="menu-section">
-        <div class="menu-title">功能選單 (解析自硬體訊號)</div>
-        <div class="menu-grid" id="ui-menu-grid"><div id="menu-placeholder" style="color: #666; padding: 10px;">請先建立藍牙連線...</div></div>
-    </div>
-    <div class="console-section">
-        <div class="console-title">接收控制台 (已自動清理 ANSI 亂碼)</div>
-        <div class="terminal" id="terminal-box"></div>
-    </div>
+    <div class="terminal" id="terminal-box"></div>
 
     <script>
-        // ... (保持您原有的變數宣告)
-        let menuRawLines = [], isMenuParsed = false, maxLogLines = 200, currentEncoding = 'ASCII', isConnected = false;
-        let g_device = null, g_rxCharacteristic = null, g_txCharacteristic = null, dataBuffer = ""; 
+        let isConnected = false;
+        let g_txCharacteristic = null;
+        let dataBuffer = "";
 
-        // [新增] 移植自 Android 的 ANSI 與控制碼清理邏輯
-        function cleanRawData(text) {
-            return text.replace(/\u001b\[2J/g, "").replace(/\u001b\[H/g, "")
-                       .replace(/\x1B\[\??[0-9;]*[a-zA-Z]/g, "")
-                       .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+        // 【穩定的清理邏輯】確保顯示內容乾淨，且不干擾原始資料
+        function cleanAnsi(text) {
+            return text.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+                       .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
         }
 
-        function handleRawChunk(chunk) {
-            // 在數據進入處理器前先清理
-            let cleanChunk = cleanRawData(chunk);
-            dataBuffer += cleanChunk;
+        async function handleConnectionClick() {
+            if (isConnected) { location.reload(); return; }
+            
+            try {
+                // 恢復您原本成功運作的連線架構
+                const device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
+                });
+                
+                const server = await device.gatt.connect();
+                const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
+                const char = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
+                
+                g_txCharacteristic = char;
+                isConnected = true;
+                document.getElementById('conn-status').innerText = "[已連線]";
+
+                await char.startNotifications();
+                char.addEventListener('characteristicvaluechanged', (event) => {
+                    let decoder = new TextDecoder('iso-8859-1');
+                    let raw = decoder.decode(event.target.value);
+                    processIncomingLine(raw);
+                });
+                
+                appendLogToTerminal("[系統]: 連線成功\n");
+            } catch (e) { alert("連線失敗: " + e); }
+        }
+
+        function processIncomingLine(rawText) {
+            // A. 顯示原始資料 (清理過 ANSI 後)
+            const cleanText = cleanAnsi(rawText);
+            if (cleanText) appendLogToTerminal(cleanText);
+
+            // B. 解析選單 (不影響顯示)
+            dataBuffer += cleanText;
             if (dataBuffer.includes('\n')) {
                 let lines = dataBuffer.split('\n');
-                dataBuffer = lines.pop(); 
-                lines.forEach(line => processIncomingLine(line.trim()));
+                dataBuffer = lines.pop();
+                lines.forEach(line => {
+                    if (/^\(\d+\)\s+.+/.test(line.trim())) {
+                        console.log("偵測到選單:", line.trim());
+                    }
+                });
             }
         }
 
-        function processIncomingLine(line) {
-            if (!line) return;
-            appendLogToTerminal(line);
-
-            // 調整後的選單判定 (符合您的截圖格式: (1) 文字)
-            if (/^\(\d+\)\s+.+/.test(line)) {
-                if (!menuRawLines.includes(line)) {
-                    menuRawLines.push(line);
-                    clearTimeout(window.menuRenderTimer);
-                    window.menuRenderTimer = setTimeout(() => { renderUiMenu(menuRawLines); }, 300);
-                }
+        async function sendManualCmd() {
+            const input = document.getElementById('cmd-input');
+            if (input.value && g_txCharacteristic) {
+                const data = new TextEncoder().encode(input.value + "\r\n");
+                await g_txCharacteristic.writeValueWithoutResponse(data);
+                appendLogToTerminal(`\n>> 發送: ${input.value}\n`);
+                input.value = '';
             }
         }
 
-        // ... (保持您原有的 connectToHardware, sendBle232RawCmd, renderUiMenu 等函式)
-        // 注意：在 connectToHardware 中的 decodeDataView 處，請使用新的 cleanRawData
-        function decodeDataView(dataView) {
-            const encodingMode = currentEncoding === 'BIG5' ? 'big5' : 'iso-8859-1'; // 推薦使用 iso-8859-1 相容性更好
-            const decoder = new TextDecoder(encodingMode);
-            return decoder.decode(dataView);
+        function appendLogToTerminal(text) {
+            const term = document.getElementById('terminal-box');
+            term.innerHTML += text;
+            term.scrollTop = term.scrollHeight;
         }
-
-        // 確保 handleConnection 中的監聽器呼叫清理函式
-        // ... (其他原有邏輯維持不變)
     </script>
 </body>
 </html>
