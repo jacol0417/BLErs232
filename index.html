@@ -119,12 +119,10 @@ connStatus.className = "status-btn connecting";
 hardwareId.innerText = "線材識別：啟動瀏覽器藍牙搜尋...";
 appendLogToTerminal(`[系統]: 正在呼叫網頁藍牙組件...`);
 
-// 💡 擴充廣播服務，納入常見的 FFE0 以及標準 Nordic NUS 服務
 g_device = await navigator.bluetooth.requestDevice({
 acceptAllDevices: true,
 optionalServices: [
-'0000ffe0-0000-1000-8000-00805f9b34fb',
-'6e400001-b5a3-f393-e0a9-e50e24dcca9e' 
+'0000ffe0-0000-1000-8000-00805f9b34fb'
 ]
 });
 
@@ -137,64 +135,35 @@ return;
 hardwareId.innerText = `已選取: ${g_device.name || '未命名裝置'}`;
 appendLogToTerminal(`[系統]: 正在建立 GATT 連線...`);
 g_gattServer = await g_device.gatt.connect();
-appendLogToTerminal(`[系統]: 連線成功，啟動高相容性通道適配...`);
+appendLogToTerminal(`[系統]: 連線成功，鎖定 FFE1 單通道服務...`);
 
 const services = await g_gattServer.getPrimaryServices();
-g_rxCharacteristic = null;
-g_txCharacteristic = null;
+let ffe1Char = null;
 
-// 🚀 第一階段：尋找優先特徵值 (ffe1, ffe2, NUS 等)，排除 18xx 系統服務
+// 🚀 尋找 FFE1 特徵值 (排除系統服務 0x18xx)
 for (const service of services) {
     const sUuid = service.uuid.toLowerCase();
     if (sUuid.startsWith("000018")) continue; // 排除系統服務避免誤判
 
     const characteristics = await service.getCharacteristics();
     for (const char of characteristics) {
-        const props = char.properties;
         const uuidStr = char.uuid.toLowerCase();
-
-        // 優先接收端 (Notify)
-        if (uuidStr.includes("ffe1") || uuidStr.includes("6e400003")) {
-            if (props.notify) {
-                g_rxCharacteristic = char;
-                appendLogToTerminal(`[系統]: 成功鎖定優先接收端 (RX) -> UUID: ${char.uuid.substring(0, 8)}`);
-            }
-        }
-        // 優先發送端 (Write)
-        if (uuidStr.includes("ffe2") || uuidStr.includes("ffe1") || uuidStr.includes("6e400002")) {
-            if (props.write || props.writeWithoutResponse) {
-                g_txCharacteristic = char;
-                appendLogToTerminal(`[系統]: 成功鎖定優先發送端 (TX) -> UUID: ${char.uuid.substring(0, 8)}`);
-            }
+        if (uuidStr.includes("ffe1")) {
+            ffe1Char = char;
+            appendLogToTerminal(`[系統]: 成功鎖定 FFE1 (收發合一) -> UUID: ${char.uuid.substring(0, 8)}`);
+            break;
         }
     }
+    if (ffe1Char) break;
 }
 
-// 🚀 第二階段：若未找齊優先特徵值，才啟動備用方案（同樣排除 18xx）
-if (!g_rxCharacteristic || !g_txCharacteristic) {
-    for (const service of services) {
-        const sUuid = service.uuid.toLowerCase();
-        if (sUuid.startsWith("000018")) continue;
-
-        const characteristics = await service.getCharacteristics();
-        for (const char of characteristics) {
-            const props = char.properties;
-            if (!g_rxCharacteristic && props.notify) {
-                g_rxCharacteristic = char;
-                appendLogToTerminal(`[系統]: 鎖定備用接收端 (RX) -> UUID: ${char.uuid.substring(0, 8)}`);
-            }
-            if (!g_txCharacteristic && (props.write || props.writeWithoutResponse)) {
-                g_txCharacteristic = char;
-                appendLogToTerminal(`[系統]: 鎖定備用發送端 (TX) -> UUID: ${char.uuid.substring(0, 8)}`);
-            }
-        }
-    }
+if (!ffe1Char) {
+    throw new Error("在此藍牙模組上找不到相容的 FFE1 特徵值！");
 }
 
-// 防呆機制
-if (!g_rxCharacteristic || !g_txCharacteristic) {
-    throw new Error("在此藍牙模組上找不到相容的序列埠透傳特徵值！");
-}
+// 🚀 強制將收與發都綁定到 FFE1
+g_rxCharacteristic = ffe1Char;
+g_txCharacteristic = ffe1Char;
 
 isConnected = true;
 connStatus.innerText = "[已連線]";
@@ -207,7 +176,7 @@ menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
 
 g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
 
-// 開啟監聽（Web Bluetooth 會在底層自動處理 0x2902 CCCD）
+// 開啟 FFE1 監聽
 await g_rxCharacteristic.startNotifications();
 g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
     try {
@@ -252,7 +221,7 @@ cmdInput.disabled = true;
 sendBtn.disabled = true;
 }
 
-// 發送端保持純淨 ASCII 流，自動根據硬體支援度選擇最優發送模式
+// 發送端保持純淨 ASCII 流，由 FFE1 負責傳送
 async function sendBle232RawCmd(cmdText) {
 if (!g_txCharacteristic) return;
 try {
@@ -325,11 +294,11 @@ processIncomingLine(line);
 }
 
 function processIncomingLine(line) {
-// ✨ 核心優化：利用正則表達式過濾掉 VT100 / ANSI Escape 序列
+// ✨ 核心優化：過濾掉 VT100 / ANSI Escape 序列
 const cleanLine = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
 if (!cleanLine) return;
 
-// 在控制台顯示過濾後的乾淨文字
+// 在控制台顯示乾淨文字
 appendLogToTerminal(cleanLine);
 
 // 使用脫去 VT100 外衣的乾淨字串進行選單判定
