@@ -4,9 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>空調系統重置</title>
+
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
 <style>
 body {
 margin: 0; padding: 0; background-color: #121212; color: #ffffff;
@@ -20,11 +22,14 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 .status-btn { background: transparent; border: 1px solid #ff5252; color: #ff5252; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold; transition: all 0.2s ease; white-space: nowrap; flex-shrink: 0; }
 .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
 .status-btn.connecting { border-color: #ffd740; color: #ffd740; }
+
 .input-group { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 14px; }
 .input-group input { flex: 1; min-width: 80px; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px 4px; font-size: 16px; outline: none; }
 .input-group input:disabled { border-bottom: 2px solid #37474f; color: #555555; }
+
 .input-group button { background: transparent; border: 1px solid #ffffff; border-radius: 4px; color: #ffffff; font-size: 14px; cursor: pointer; padding: 6px 12px; white-space: nowrap; flex-shrink: 0; font-weight: bold; }
 .input-group button:disabled { color: #555555; border-color: #37474f; cursor: not-allowed; }
+
 #encode-btn { border-color: #69f0ae; color: #69f0ae; }
 #clear-btn { color: #ffb74d; border-color: #ffb74d; }
 #send-btn { color: #4fc3f7; border-color: #4fc3f7; }
@@ -34,6 +39,7 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 .menu-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; max-height: 180px; overflow-y: auto; contain: content; }
 .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; text-align: left; font-size: 13px; font-family: monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .menu-grid button:active { background-color: #333333; }
+
 .console-section { flex: 1; margin: 0 12px 12px 12px; display: flex; flex-direction: column; overflow: hidden; }
 .console-title { color: #aaaaaa; font-size: 14px; margin-bottom: 4px; }
 .terminal { flex: 1; background-color: #000000; border: 1px solid #222222; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; line-height: 1.4; overflow-y: scroll; white-space: pre-wrap; word-break: break-all; -webkit-overflow-scrolling: touch; }
@@ -48,6 +54,7 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 <div class="hardware-title" id="hardware-id">線材識別：等待網頁藍牙連線...</div>
 <button class="status-btn" id="conn-status" onclick="handleConnectionClick()">[未連線]</button>
 </div>
+
 <div class="input-group">
 <input type="text" id="cmd-input" placeholder="請先連接硬體..." disabled onkeydown="if(event.key==='Enter') sendManualCmd()">
 <button id="encode-btn" onclick="toggleEncoding()">ASCII</button>
@@ -119,11 +126,9 @@ connStatus.className = "status-btn connecting";
 hardwareId.innerText = "線材識別：啟動瀏覽器藍牙搜尋...";
 appendLogToTerminal(`[系統]: 正在呼叫網頁藍牙組件...`);
 
+// 💡 調整：在 filters 中精確過濾 FFE0 服務，比 acceptAllDevices 具備更好的安全與連線穩定度
 g_device = await navigator.bluetooth.requestDevice({
-acceptAllDevices: true,
-optionalServices: [
-'0000ffe0-0000-1000-8000-00805f9b34fb'
-]
+    filters: [{ services: ['0000ffe0-0000-1000-8000-00805f9b34fb'] }]
 });
 
 if (!g_device) {
@@ -135,15 +140,15 @@ return;
 hardwareId.innerText = `已選取: ${g_device.name || '未命名裝置'}`;
 appendLogToTerminal(`[系統]: 正在建立 GATT 連線...`);
 g_gattServer = await g_device.gatt.connect();
-appendLogToTerminal(`[系統]: 連線成功，鎖定 FFE1 單通道服務...`);
+appendLogToTerminal(`[系統]: 連線成功，精準鎖定 FFE1 單通道服務...`);
 
 const services = await g_gattServer.getPrimaryServices();
 let ffe1Char = null;
 
-// 🚀 尋找 FFE1 特徵值 (排除系統服務 0x18xx)
+// 🚀 精準搜尋 FFE1 特徵值 (排除 0x18xx 系統服務以免誤抓)
 for (const service of services) {
     const sUuid = service.uuid.toLowerCase();
-    if (sUuid.startsWith("000018")) continue; // 排除系統服務避免誤判
+    if (sUuid.startsWith("000018")) continue; 
 
     const characteristics = await service.getCharacteristics();
     for (const char of characteristics) {
@@ -161,7 +166,7 @@ if (!ffe1Char) {
     throw new Error("在此藍牙模組上找不到相容的 FFE1 特徵值！");
 }
 
-// 🚀 強制將收與發都綁定到 FFE1
+// 🚀 強制讓收與發都對齊同一個 FFE1
 g_rxCharacteristic = ffe1Char;
 g_txCharacteristic = ffe1Char;
 
@@ -176,8 +181,8 @@ menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
 
 g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
 
-// 開啟 FFE1 監聽
-await g_rxCharacteristic.startNotifications();
+// 🚀 【核心修正 1】：必須先綁定 'characteristicvaluechanged' 事件監聽，再啟動 startNotifications()
+// 這能確保在通道開啟的微秒瞬間，抵達的第一個 Byte 數據不會被瀏覽器漏掉
 g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
     try {
         let value = event.target.value;
@@ -188,6 +193,7 @@ g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
     }
 });
 
+await g_rxCharacteristic.startNotifications();
 appendLogToTerminal(`[系統]: 藍牙序列埠通道建立完畢，已準備就緒！`);
 
 // 🚀 自動發送 Enter 敲門，要求空調主板吐出選單
@@ -201,7 +207,6 @@ appendLogToTerminal("[系統]: 使用者取消了藍牙搜尋。");
 resetConnectionUi();
 return;
 }
-
 alert("【藍牙啟動失敗】:\n" + (error.message || error));
 resetConnectionUi();
 }
@@ -225,7 +230,7 @@ sendBtn.disabled = true;
 async function sendBle232RawCmd(cmdText) {
 if (!g_txCharacteristic) return;
 try {
-const fullText = cmdText + "\r\n";
+const fullText = cmdText + "\r";
 const encoder = new TextEncoder();
 const data = encoder.encode(fullText);
 
@@ -282,40 +287,48 @@ menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column
 appendLogToTerminal("[系統]: 畫面與暫存選單已清除並重新偵測。");
 }
 
+// 🎯 【核心修正 2】：打破「不換行就不顯示」的畫面黑屏 Bug
 function handleRawChunk(chunk) {
-dataBuffer += chunk;
-if (dataBuffer.includes('\n')) {
-let lines = dataBuffer.split('\n');
-dataBuffer = lines.pop();
-lines.forEach(line => {
-processIncomingLine(line);
-});
-}
+    dataBuffer += chunk;
+    
+    // 選單解析邏輯（依然依賴完整的 \n）
+    if (dataBuffer.includes('\n')) {
+        let lines = dataBuffer.split('\n');
+        dataBuffer = lines.pop(); // 保留不完整的一行
+        lines.forEach(line => {
+            processIncomingLine(line);
+        });
+    } else {
+        // 🚀 關鍵：如果收到不含換行符的「單個字元、片段」，也要立即顯示，防止除錯時畫面看起來沒動靜
+        const cleanChunk = chunk.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
+        if (cleanChunk) {
+            appendLogToTerminal(`[即時數據流]: ${cleanChunk}`);
+        }
+    }
 }
 
 function processIncomingLine(line) {
-// ✨ 核心優化：過濾掉 VT100 / ANSI Escape 序列
-const cleanLine = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
-if (!cleanLine) return;
+    // 過濾 VT100 控制碼
+    const cleanLine = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
+    if (!cleanLine) return;
 
-// 在控制台顯示乾淨文字
-appendLogToTerminal(cleanLine);
+    appendLogToTerminal(cleanLine);
 
-// 使用脫去 VT100 外衣的乾淨字串進行選單判定
-const isMenuPattern = /^\(\d+\)|^\d+\./.test(cleanLine);
+    // 判定是否為功能選單樣式
+    const isMenuPattern = /^\(\d+\)|^\d+\./.test(cleanLine);
 
-if (isMenuPattern) {
-if (!isMenuParsed) {
-if (!menuRawLines.includes(cleanLine)) {
-menuRawLines.push(cleanLine);
-}
-clearTimeout(window.menuRenderTimer);
-window.menuRenderTimer = setTimeout(() => {
-renderUiMenu(menuRawLines);
-isMenuParsed = true;
-}, 250);
-}
-}
+    if (isMenuPattern) {
+        if (!isMenuParsed) {
+            if (!menuRawLines.includes(cleanLine)) {
+                menuRawLines.push(cleanLine);
+            }
+            clearTimeout(window.menuRenderTimer);
+            window.menuRenderTimer = setTimeout(() => {
+                renderUiMenu(menuRawLines);
+                isMenuParsed = true;
+            }, 250);
+        }
+    }
 }
 
 function renderUiMenu(lines) {
@@ -333,10 +346,15 @@ menuGrid.appendChild(btn);
 });
 }
 
+// 🎯 【核心修正 3】：將 DataView 強制包裝成 Uint8Array
+// 防止部分 Android 手機 Chrome 內建 WebView 直接對 DataView 解碼時拋出隱形錯誤 (Silent Crash)
 function decodeDataView(dataView) {
-const encodingMode = currentEncoding === 'BIG5' ? 'big5' : 'ascii';
-const decoder = new TextDecoder(encodingMode);
-return decoder.decode(dataView);
+    const encodingMode = currentEncoding === 'BIG5' ? 'big5' : 'ascii';
+    const decoder = new TextDecoder(encodingMode);
+    
+    // 強制將 DataView 封裝為標準 Uint8Array 陣列再解碼
+    const uint8 = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
+    return decoder.decode(uint8);
 }
 
 function toggleEncoding() {
