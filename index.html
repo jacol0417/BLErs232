@@ -119,7 +119,7 @@ connStatus.className = "status-btn connecting";
 hardwareId.innerText = "線材識別：啟動瀏覽器藍牙搜尋...";
 appendLogToTerminal(`[系統]: 正在呼叫網頁藍牙組件...`);
 
-// 💡 擴充廣播白名單，納入常見的藍牙串口服務 UUID（例如 FFE0 以及標準 Nordic NUS 服務）
+// 💡 擴充廣播服務，納入常見的 FFE0 以及標準 Nordic NUS 服務
 g_device = await navigator.bluetooth.requestDevice({
 acceptAllDevices: true,
 optionalServices: [
@@ -137,30 +137,55 @@ return;
 hardwareId.innerText = `已選取: ${g_device.name || '未命名裝置'}`;
 appendLogToTerminal(`[系統]: 正在建立 GATT 連線...`);
 g_gattServer = await g_device.gatt.connect();
-appendLogToTerminal(`[系統]: 連線成功，啟動動態通道自動適配...`);
+appendLogToTerminal(`[系統]: 連線成功，啟動高相容性通道適配...`);
 
-// 🎯 【動態適配核心】：不寫死特定特徵值，改為動態遍歷掃描屬性
 const services = await g_gattServer.getPrimaryServices();
 g_rxCharacteristic = null;
 g_txCharacteristic = null;
 
+// 🚀 第一階段：尋找優先特徵值 (ffe1, ffe2, NUS 等)，排除 18xx 系統服務
 for (const service of services) {
+    const sUuid = service.uuid.toLowerCase();
+    if (sUuid.startsWith("000018")) continue; // 排除系統服務避免誤判
+
     const characteristics = await service.getCharacteristics();
     for (const char of characteristics) {
         const props = char.properties;
-        
-        // 1. 自動鎖定具備推播能力的特徵值作為「接收通道 (RX)」
-        if (props.notify && !g_rxCharacteristic) {
-            g_rxCharacteristic = char;
-            appendLogToTerminal(`[系統]: 成功鎖定接收端 (RX) -> UUID: ${char.uuid.substring(0, 8)}`);
+        const uuidStr = char.uuid.toLowerCase();
+
+        // 優先接收端 (Notify)
+        if (uuidStr.includes("ffe1") || uuidStr.includes("6e400003")) {
+            if (props.notify) {
+                g_rxCharacteristic = char;
+                appendLogToTerminal(`[系統]: 成功鎖定優先接收端 (RX) -> UUID: ${char.uuid.substring(0, 8)}`);
+            }
         }
-        
-        // 2. 自動鎖定具備寫入能力的特徵值作為「發送通道 (TX)」
-        if (props.write || props.writeWithoutResponse) {
-            // 策略：如果還沒綁定 TX，或者原本綁定的是單晶片收發合一(TX==RX)，但現在掃描到獨立的純發送通道(如 FFE2)，則更新覆蓋它
-            if (!g_txCharacteristic || (g_txCharacteristic === g_rxCharacteristic && char !== g_rxCharacteristic)) {
+        // 優先發送端 (Write)
+        if (uuidStr.includes("ffe2") || uuidStr.includes("ffe1") || uuidStr.includes("6e400002")) {
+            if (props.write || props.writeWithoutResponse) {
                 g_txCharacteristic = char;
-                appendLogToTerminal(`[系統]: 成功鎖定發送端 (TX) -> UUID: ${char.uuid.substring(0, 8)}`);
+                appendLogToTerminal(`[系統]: 成功鎖定優先發送端 (TX) -> UUID: ${char.uuid.substring(0, 8)}`);
+            }
+        }
+    }
+}
+
+// 🚀 第二階段：若未找齊優先特徵值，才啟動備用方案（同樣排除 18xx）
+if (!g_rxCharacteristic || !g_txCharacteristic) {
+    for (const service of services) {
+        const sUuid = service.uuid.toLowerCase();
+        if (sUuid.startsWith("000018")) continue;
+
+        const characteristics = await service.getCharacteristics();
+        for (const char of characteristics) {
+            const props = char.properties;
+            if (!g_rxCharacteristic && props.notify) {
+                g_rxCharacteristic = char;
+                appendLogToTerminal(`[系統]: 鎖定備用接收端 (RX) -> UUID: ${char.uuid.substring(0, 8)}`);
+            }
+            if (!g_txCharacteristic && (props.write || props.writeWithoutResponse)) {
+                g_txCharacteristic = char;
+                appendLogToTerminal(`[系統]: 鎖定備用發送端 (TX) -> UUID: ${char.uuid.substring(0, 8)}`);
             }
         }
     }
@@ -182,12 +207,16 @@ menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
 
 g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
 
-// 開啟監聽 (網頁瀏覽器會自動在底層去寫入我們在 Android 提到的 0x2902 描述符開關)
+// 開啟監聽（Web Bluetooth 會在底層自動處理 0x2902 CCCD）
 await g_rxCharacteristic.startNotifications();
 g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
-let value = event.target.value;
-let chunk = decodeDataView(value);
-handleRawChunk(chunk);
+    try {
+        let value = event.target.value;
+        let chunk = decodeDataView(value);
+        handleRawChunk(chunk);
+    } catch (e) {
+        console.error("處理接收數據時發生錯誤:", e);
+    }
 });
 
 appendLogToTerminal(`[系統]: 藍牙序列埠通道建立完畢，已準備就緒！`);
