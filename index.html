@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>空調系統重置 (診斷除錯版)</title>
+<title>空調系統重置</title>
 
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -42,12 +42,26 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 
 .console-section { flex: 1; margin: 0 12px 12px 12px; display: flex; flex-direction: column; overflow: hidden; }
 .console-title { color: #aaaaaa; font-size: 14px; margin-bottom: 4px; }
-.terminal { flex: 1; background-color: #000000; border: 1px solid #222222; padding: 8px; font-family: monospace; font-size: 12px; color: #00ff00; line-height: 1.4; overflow-y: scroll; white-space: pre-wrap; word-break: break-all; -webkit-overflow-scrolling: touch; }
+
+/* 🎯 調整終端機 CSS：採用標準 pre 等寬排版，強制 80 字元絕對不折行 */
+.terminal { 
+  flex: 1; 
+  background-color: #000000; 
+  border: 1px solid #222222; 
+  padding: 8px; 
+  font-family: monospace; 
+  font-size: 12px; 
+  color: #00ff00; 
+  line-height: 1.4; 
+  overflow: auto; 
+  white-space: pre; 
+  -webkit-overflow-scrolling: touch; 
+}
 </style>
 </head>
 <body>
 
-<div class="header">空調系統重置 (診斷除錯版)</div>
+<div class="header">空調系統重置 (狀態機除錯版)</div>
 
 <div class="control-panel">
 <div class="hardware-row">
@@ -71,11 +85,225 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 </div>
 
 <div class="console-section">
-<div class="console-title">接收控制台 (原始資料流)</div>
+<div class="console-title">接收控制台 (80 × 24 虛擬終端)</div>
 <div class="terminal" id="terminal-box"></div>
 </div>
 
 <script>
+// ==========================================
+// 🎯 1:1 移植：工業級 80 × 24 虛擬終端狀態機
+// ==========================================
+class TerminalView {
+    constructor(element) {
+        this.element = element;
+        this.terminalRows = 24;
+        this.terminalCols = 80;
+        
+        // 建立 24x80 的空白畫布陣列
+        this.screenBuffer = Array.from({ length: this.terminalRows }, () => new Array(this.terminalCols).fill(' '));
+        this.cursorRow = 0;
+        this.cursorCol = 0;
+
+        // 狀態機定義
+        this.ParserState = { NORMAL: 0, ESC: 1, CSI: 2 };
+        this.currentState = this.ParserState.NORMAL;
+        this.csiBuffer = '';
+
+        this.isRenderPending = false;
+        this.renderTimeout = null;
+    }
+
+    /**
+     * 資料串流解析核心 (徹底解決分包與絕對座標殘留問題)
+     */
+    writeText(text) {
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+            switch (this.currentState) {
+                case this.ParserState.NORMAL:
+                    switch (ch) {
+                        case '\x1b': // 偵測到 ESC (\u001b)，進入控制狀態
+                            this.currentState = this.ParserState.ESC;
+                            break;
+                        case '\n':
+                            this.cursorRow++;
+                            if (this.cursorRow >= this.terminalRows) {
+                                this.scrollUpBuffer();
+                                this.cursorRow = this.terminalRows - 1;
+                            }
+                            break;
+                        case '\r':
+                            this.cursorCol = 0;
+                            break;
+                        default:
+                            // 正常字元直接寫入指定座標
+                            if (this.cursorRow >= 0 && this.cursorRow < this.terminalRows &&
+                                this.cursorCol >= 0 && this.cursorCol < this.terminalCols) {
+                                this.screenBuffer[this.cursorRow][this.cursorCol] = ch;
+                                this.cursorCol++;
+
+                                // 邊界自動換行
+                                if (this.cursorCol >= this.terminalCols) {
+                                    this.cursorCol = 0;
+                                    this.cursorRow++;
+                                    if (this.cursorRow >= this.terminalRows) {
+                                        this.scrollUpBuffer();
+                                        this.cursorRow = this.terminalRows - 1;
+                                    }
+                                }
+                            }
+                            break;
+                    }
+                    break;
+
+                case this.ParserState.ESC:
+                    if (ch === '[') {
+                        this.csiBuffer = '';
+                        this.currentState = this.ParserState.CSI; // 開始收集 ANSI 參數
+                    } else {
+                        this.currentState = this.ParserState.NORMAL; // 不支援的 ESC，退回正常模式
+                    }
+                    break;
+
+                case this.ParserState.CSI:
+                    if ((ch >= '0' && ch <= '9') || ch === ';' || ch === '?' || ch === '"') {
+                        this.csiBuffer += ch; // 持續收集
+                    } else {
+                        this.handleCsiCommand(ch, this.csiBuffer);
+                        this.currentState = this.ParserState.NORMAL; // 解析完畢，退回正常
+                    }
+                    break;
+            }
+        }
+        this.triggerRequestRender();
+    }
+
+    /**
+     * 解析 CSI 控制碼
+     */
+    handleCsiCommand(cmd, params) {
+        switch (cmd) {
+            case 'H':
+            case 'f': // 游標絕對座標定位 (如 [3;59H)
+                if (params === '') {
+                    this.cursorRow = 0;
+                    this.cursorCol = 0;
+                } else {
+                    const parts = params.split(';');
+                    const r = parseInt(parts[0], 10) || 1;
+                    const c = parseInt(parts[1], 10) || 1;
+                    this.cursorRow = Math.max(0, Math.min(r - 1, this.terminalRows - 1));
+                    this.cursorCol = Math.max(0, Math.min(c - 1, this.terminalCols - 1));
+                }
+                break;
+            case 'J': // 清除全螢幕 (如 [2J)
+                if (params === '2' || params === '') {
+                    for (let r = 0; r < this.terminalRows; r++) {
+                        this.screenBuffer[r].fill(' ');
+                    }
+                    this.cursorRow = 0;
+                    this.cursorCol = 0;
+                }
+                break;
+            case 'K': // 行內局部清除 (如 [0K)
+                if (params === '0' || params === '') {
+                    if (this.cursorRow >= 0 && this.cursorRow < this.terminalRows) {
+                        this.screenBuffer[this.cursorRow].fill(' ', this.cursorCol, this.terminalCols);
+                    }
+                }
+                break;
+        }
+    }
+
+    /**
+     * 畫布滾動
+     */
+    scrollUpBuffer() {
+        for (let i = 0; i < this.terminalRows - 1; i++) {
+            this.screenBuffer[i] = [...this.screenBuffer[i + 1]];
+        }
+        this.screenBuffer[this.terminalRows - 1].fill(' ');
+    }
+
+    /**
+     * 30ms 渲染防抖 (防止高頻串流阻塞網頁 DOM 效能)
+     */
+    triggerRequestRender() {
+        if (!this.isRenderPending) {
+            this.isRenderPending = true;
+            this.renderTimeout = setTimeout(() => {
+                this.renderActual();
+            }, 30);
+        }
+    }
+
+    /**
+     * 實際渲染到網頁 UI 上
+     */
+    renderActual() {
+        this.isRenderPending = false;
+        let fullLines = [];
+        for (let i = 0; i < this.terminalRows; i++) {
+            // 去除每行尾端的無用空白
+            const rowStr = this.screenBuffer[i].join('').trimEnd();
+            fullLines.push(rowStr);
+        }
+        
+        // 渲染純文字到 pre 元件中
+        this.element.textContent = fullLines.join('\n');
+        
+        // 保持滾動條置底
+        this.element.scrollTop = this.element.scrollHeight;
+
+        // 🚀 從 24 行畫布中自動更新選單 UI 按鈕
+        this.parseMenuFromScreen();
+    }
+
+    /**
+     * 螢幕選單掃描器 (WYSIWYG 模式，畫面上看得到什麼就提供什麼按鈕)
+     */
+    parseMenuFromScreen() {
+        let foundLines = [];
+        for (let i = 0; i < this.terminalRows; i++) {
+            const line = this.screenBuffer[i].join('').trim();
+            const isMenuPattern = /^\(\d+\)|^\d+\./.test(line);
+            if (isMenuPattern) {
+                if (!foundLines.includes(line)) {
+                    foundLines.push(line);
+                }
+            }
+        }
+        
+        if (foundLines.length > 0) {
+            // 優化效能：比對與當前按鈕內容是否完全一致，若一致則不重新構建 DOM
+            const currentButtons = Array.from(menuGrid.querySelectorAll('button')).map(btn => btn.innerText);
+            const isSame = currentButtons.length === foundLines.length && 
+                           currentButtons.every((val, index) => val === foundLines[index]);
+            if (!isSame) {
+                renderUiMenu(foundLines);
+            }
+        }
+    }
+
+    /**
+     * 重置畫布與狀態機
+     */
+    clearTerminal() {
+        if (this.renderTimeout) clearTimeout(this.renderTimeout);
+        this.isRenderPending = false;
+        for (let r = 0; r < this.terminalRows; r++) {
+            this.screenBuffer[r].fill(' ');
+        }
+        this.cursorRow = 0;
+        this.cursorCol = 0;
+        this.currentState = this.ParserState.NORMAL;
+        this.element.textContent = '';
+    }
+}
+
+// ==========================================
+// 原始程式邏輯與 Web Bluetooth 初始化
+// ==========================================
 const terminalBox = document.getElementById('terminal-box');
 const menuGrid = document.getElementById('ui-menu-grid');
 const encodeBtn = document.getElementById('encode-btn');
@@ -85,9 +313,9 @@ const cmdInput = document.getElementById('cmd-input');
 const sendBtn = document.getElementById('send-btn');
 const menuPlaceholder = document.getElementById('menu-placeholder');
 
-let menuRawLines = [];
-let isMenuParsed = false;
-let maxLogLines = 300;
+// 初始化虛擬終端
+const g_terminal = new TerminalView(terminalBox);
+
 let currentEncoding = 'ASCII';
 let isConnected = false;
 
@@ -95,7 +323,6 @@ let g_device = null;
 let g_gattServer = null;
 let g_rxCharacteristic = null;
 let g_txCharacteristic = null;
-let dataBuffer = "";
 
 async function handleConnectionClick() {
     if (!isConnected) {
@@ -117,7 +344,6 @@ async function connectToHardware() {
         hardwareId.innerText = "線材識別：啟動藍牙搜尋器...";
         appendLogToTerminal(`[系統]: 呼叫 Web Bluetooth 組件...`);
 
-        // 💡 調整：使用 acceptAllDevices 確保不漏掉任何特殊的雙模藍牙廣播
         g_device = await navigator.bluetooth.requestDevice({
             acceptAllDevices: true,
             optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
@@ -133,7 +359,6 @@ async function connectToHardware() {
         appendLogToTerminal(`[系統]: 正在與 GATT 伺服器建立握手...`);
         g_gattServer = await g_device.gatt.connect();
 
-        // 🚀 【關鍵修正 1】：連線成功後，強制等待 1000ms 讓 JDY-33 內部硬體狀態穩定
         appendLogToTerminal(`[系統]: 連線成功！硬體指示燈應常亮。強制等待 1 秒讓晶片穩定...`);
         await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -158,7 +383,6 @@ async function connectToHardware() {
             throw e;
         }
 
-        // 🚀 雙向收發全部指向同一個 FFE1
         g_rxCharacteristic = ffe1Char;
         g_txCharacteristic = ffe1Char;
 
@@ -173,25 +397,26 @@ async function connectToHardware() {
 
         g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
 
-        // 🚀 【關鍵修正 2】：先綁定監聽器，再向晶片發送開啟 Notification 的指令
         appendLogToTerminal(`[系統]: 正在綁定 FFE1 資料接收接頭...`);
         g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
             try {
                 const value = event.target.value;
                 if (!value) return;
 
-                // 🚀 【終極防線】：只要收到任何位元組，不論解碼與換行邏輯如何，強制無條件印出 16 進位原始碼！
+                // 🚀 【終極防線】：100% 原始位元組日誌（只印在瀏覽器 Console 避免污染 80x24 終端螢幕）
                 const rawBytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
                 const hexStr = Array.from(rawBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-                
-                // 這行能 100% 證明「網頁到底有沒有收到物理訊號」
-                appendLogToTerminal(`[物理收包 (HEX)]: ${hexStr}`);
+                console.log(`[物理收包 (HEX)]: ${hexStr}`);
 
                 // 進入正常字串轉碼
                 let chunk = decodeDataView(value);
-                handleRawChunk(chunk);
+                
+                // 🚀 核心升級：直接餵給狀態機，告別原始換行處理邏輯
+                if (g_terminal) {
+                    g_terminal.writeText(chunk);
+                }
             } catch (err) {
-                appendLogToTerminal(`❌ [處理收包時崩潰]: ${err.message}`);
+                console.error(`❌ [處理收包時崩潰]: ${err.message}`);
             }
         });
 
@@ -199,7 +424,6 @@ async function connectToHardware() {
         await g_rxCharacteristic.startNotifications();
         appendLogToTerminal(`[系統]: 🎉 藍牙序列埠通道成功打通！可以開始收發！`);
 
-        // 自動發送 Enter 敲門，要求選單
         appendLogToTerminal(`[系統]: 正在發送自動敲門訊號...`);
         await sendBle232RawCmd("");
 
@@ -263,9 +487,9 @@ async function disconnectHardware() {
         g_device.gatt.disconnect();
     }
     isConnected = false;
-    isMenuParsed = false;
-    menuRawLines = [];
-    dataBuffer = "";
+    if (g_terminal) {
+        g_terminal.clearTerminal();
+    }
     resetConnectionUi();
 
     menuGrid.innerHTML = '<div style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
@@ -273,9 +497,9 @@ async function disconnectHardware() {
 }
 
 function clearConsole() {
-    terminalBox.innerHTML = '';
-    isMenuParsed = false;
-    menuRawLines = [];
+    if (g_terminal) {
+        g_terminal.clearTerminal();
+    }
     if (isConnected) {
         menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，正在重新呼叫選單...</div>';
         sendBle232RawCmd("");
@@ -283,44 +507,6 @@ function clearConsole() {
         menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
     }
     appendLogToTerminal("[系統]: 畫面已清除，重新發送敲門訊號。");
-}
-
-// 緩衝處理
-function handleRawChunk(chunk) {
-    dataBuffer += chunk;
-    if (dataBuffer.includes('\n')) {
-        let lines = dataBuffer.split('\n');
-        dataBuffer = lines.pop(); 
-        lines.forEach(line => {
-            processIncomingLine(line);
-        });
-    } else {
-        const cleanChunk = chunk.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
-        if (cleanChunk) {
-            appendLogToTerminal(`[字串流]: ${cleanChunk}`);
-        }
-    }
-}
-
-function processIncomingLine(line) {
-    const cleanLine = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
-    if (!cleanLine) return;
-
-    appendLogToTerminal(cleanLine);
-
-    const isMenuPattern = /^\(\d+\)|^\d+\./.test(cleanLine);
-    if (isMenuPattern) {
-        if (!isMenuParsed) {
-            if (!menuRawLines.includes(cleanLine)) {
-                menuRawLines.push(cleanLine);
-            }
-            clearTimeout(window.menuRenderTimer);
-            window.menuRenderTimer = setTimeout(() => {
-                renderUiMenu(menuRawLines);
-                isMenuParsed = true;
-            }, 250);
-        }
-    }
 }
 
 function renderUiMenu(lines) {
@@ -341,7 +527,6 @@ function renderUiMenu(lines) {
 function decodeDataView(dataView) {
     const encodingMode = currentEncoding === 'BIG5' ? 'big5' : 'ascii';
     const decoder = new TextDecoder(encodingMode);
-    // 強制包裝為 Uint8Array，解決 Android Webview 的解碼相容性問題
     const uint8 = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
     return decoder.decode(uint8);
 }
@@ -352,14 +537,13 @@ function toggleEncoding() {
     appendLogToTerminal(`\n[系統]: 解碼變更為 ${currentEncoding}\n`);
 }
 
+/**
+ * 為了相容系統級日誌發送，接軌狀態機寫入
+ */
 function appendLogToTerminal(text) {
-    const p = document.createElement('div');
-    p.innerText = text;
-    terminalBox.appendChild(p);
-    if (terminalBox.children.length > maxLogLines) {
-        terminalBox.removeChild(terminalBox.firstChild);
+    if (g_terminal) {
+        g_terminal.writeText(text + "\n");
     }
-    terminalBox.scrollTop = terminalBox.scrollHeight;
 }
 </script>
 </body>
