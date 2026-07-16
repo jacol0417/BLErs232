@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>空調系統重置</title>
+<title>空調系統重置 (診斷除錯版)</title>
 
 <link rel="manifest" href="manifest.json">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,7 +15,7 @@ margin: 0; padding: 0; background-color: #121212; color: #ffffff;
 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 }
-.header { background-color: #004d40; color: #ffffff; text-align: center; padding: 12px 0; font-size: 20px; font-weight: bold; letter-spacing: 2px; }
+.header { background-color: #b71c1c; color: #ffffff; text-align: center; padding: 12px 0; font-size: 20px; font-weight: bold; letter-spacing: 2px; }
 .control-panel { background-color: #0d47a1; margin: 12px; padding: 14px; border-radius: 8px; }
 .hardware-row { display: flex; justify-content: space-between; align-items: center; color: #ffffff; font-weight: bold; font-size: 14px; }
 .hardware-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 8px; }
@@ -47,7 +47,7 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 </head>
 <body>
 
-<div class="header">空調系統重置</div>
+<div class="header">空調系統重置 (診斷除錯版)</div>
 
 <div class="control-panel">
 <div class="hardware-row">
@@ -64,7 +64,7 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 </div>
 
 <div class="menu-section">
-<div class="menu-title">功能選單 (解析自硬體訊號，點擊即傳送)</div>
+<div class="menu-title">功能選單 (點擊即發送)</div>
 <div class="menu-grid" id="ui-menu-grid">
 <div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>
 </div>
@@ -76,14 +76,6 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 </div>
 
 <script>
-if ('serviceWorker' in navigator) {
-window.addEventListener('load', () => {
-navigator.serviceWorker.register('sw.js')
-.then(reg => console.log('PWA 離線快取啟用！', reg))
-.catch(err => console.error('PWA 註冊失敗：', err));
-});
-}
-
 const terminalBox = document.getElementById('terminal-box');
 const menuGrid = document.getElementById('ui-menu-grid');
 const encodeBtn = document.getElementById('encode-btn');
@@ -95,7 +87,7 @@ const menuPlaceholder = document.getElementById('menu-placeholder');
 
 let menuRawLines = [];
 let isMenuParsed = false;
-let maxLogLines = 200;
+let maxLogLines = 300;
 let currentEncoding = 'ASCII';
 let isConnected = false;
 
@@ -106,217 +98,217 @@ let g_txCharacteristic = null;
 let dataBuffer = "";
 
 async function handleConnectionClick() {
-if (!isConnected) {
-await connectToHardware();
-} else {
-await disconnectHardware();
-}
+    if (!isConnected) {
+        await connectToHardware();
+    } else {
+        await disconnectHardware();
+    }
 }
 
 async function connectToHardware() {
-try {
-if (!navigator.bluetooth) {
-alert("【環境不支援藍牙】\n1. 請確保網址開頭是 https://\n2. iOS 請使用 Bluefy 或 WebBLE 瀏覽器開啟！");
-resetConnectionUi();
-return;
-}
-
-connStatus.innerText = "[連線中...]";
-connStatus.className = "status-btn connecting";
-hardwareId.innerText = "線材識別：啟動瀏覽器藍牙搜尋...";
-appendLogToTerminal(`[系統]: 正在呼叫網頁藍牙組件...`);
-
-// 💡 調整：在 filters 中精確過濾 FFE0 服務，比 acceptAllDevices 具備更好的安全與連線穩定度
-g_device = await navigator.bluetooth.requestDevice({
-    filters: [{ services: ['0000ffe0-0000-1000-8000-00805f9b34fb'] }]
-});
-
-if (!g_device) {
-alert("您取消了藍牙選擇視窗");
-resetConnectionUi();
-return;
-}
-
-hardwareId.innerText = `已選取: ${g_device.name || '未命名裝置'}`;
-appendLogToTerminal(`[系統]: 正在建立 GATT 連線...`);
-g_gattServer = await g_device.gatt.connect();
-appendLogToTerminal(`[系統]: 連線成功，精準鎖定 FFE1 單通道服務...`);
-
-const services = await g_gattServer.getPrimaryServices();
-let ffe1Char = null;
-
-// 🚀 精準搜尋 FFE1 特徵值 (排除 0x18xx 系統服務以免誤抓)
-for (const service of services) {
-    const sUuid = service.uuid.toLowerCase();
-    if (sUuid.startsWith("000018")) continue; 
-
-    const characteristics = await service.getCharacteristics();
-    for (const char of characteristics) {
-        const uuidStr = char.uuid.toLowerCase();
-        if (uuidStr.includes("ffe1")) {
-            ffe1Char = char;
-            appendLogToTerminal(`[系統]: 成功鎖定 FFE1 (收發合一) -> UUID: ${char.uuid.substring(0, 8)}`);
-            break;
-        }
-    }
-    if (ffe1Char) break;
-}
-
-if (!ffe1Char) {
-    throw new Error("在此藍牙模組上找不到相容的 FFE1 特徵值！");
-}
-
-// 🚀 強制讓收與發都對齊同一個 FFE1
-g_rxCharacteristic = ffe1Char;
-g_txCharacteristic = ffe1Char;
-
-isConnected = true;
-connStatus.innerText = "[已連線]";
-connStatus.className = "status-btn connected";
-hardwareId.innerText = `已連接: ${g_device.name || '序列埠設備'}`;
-cmdInput.disabled = false;
-cmdInput.placeholder = "請輸入空調控制指令...";
-sendBtn.disabled = false;
-menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
-
-g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
-
-// 🚀 【核心修正 1】：必須先綁定 'characteristicvaluechanged' 事件監聽，再啟動 startNotifications()
-// 這能確保在通道開啟的微秒瞬間，抵達的第一個 Byte 數據不會被瀏覽器漏掉
-g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
     try {
-        let value = event.target.value;
-        let chunk = decodeDataView(value);
-        handleRawChunk(chunk);
-    } catch (e) {
-        console.error("處理接收數據時發生錯誤:", e);
+        if (!navigator.bluetooth) {
+            alert("此瀏覽器不支援 Web Bluetooth API。請確保網址是 https:// 並使用 Chrome/Edge 或 Bluefy 瀏覽器。");
+            return;
+        }
+
+        connStatus.innerText = "[連線中...]";
+        connStatus.className = "status-btn connecting";
+        hardwareId.innerText = "線材識別：啟動藍牙搜尋器...";
+        appendLogToTerminal(`[系統]: 呼叫 Web Bluetooth 組件...`);
+
+        // 💡 調整：使用 acceptAllDevices 確保不漏掉任何特殊的雙模藍牙廣播
+        g_device = await navigator.bluetooth.requestDevice({
+            acceptAllDevices: true,
+            optionalServices: ['0000ffe0-0000-1000-8000-00805f9b34fb']
+        });
+
+        if (!g_device) {
+            appendLogToTerminal("[系統]: 使用者取消了選擇。");
+            resetConnectionUi();
+            return;
+        }
+
+        hardwareId.innerText = `已選取: ${g_device.name || '未命名'}`;
+        appendLogToTerminal(`[系統]: 正在與 GATT 伺服器建立握手...`);
+        g_gattServer = await g_device.gatt.connect();
+
+        // 🚀 【關鍵修正 1】：連線成功後，強制等待 1000ms 讓 JDY-33 內部硬體狀態穩定
+        appendLogToTerminal(`[系統]: 連線成功！硬體指示燈應常亮。強制等待 1 秒讓晶片穩定...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        appendLogToTerminal(`[系統]: 正在獲取 FFE0 服務...`);
+        let service;
+        try {
+            service = await g_gattServer.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
+        } catch (e) {
+            appendLogToTerminal(`\n❌ [嚴重錯誤]: 找不到 FFE0 服務！該晶片可能修改了預設 UUID。`);
+            appendLogToTerminal(`[系統]: 正在掃描並列出此設備的所有服務以供除錯...`);
+            const services = await g_gattServer.getPrimaryServices();
+            services.forEach(s => appendLogToTerminal(`  -> 發現服務 UUID: ${s.uuid}`));
+            throw new Error("晶片服務 UUID 不符合預設值。");
+        }
+
+        appendLogToTerminal(`[系統]: 正在獲取 FFE1 特徵值...`);
+        let ffe1Char;
+        try {
+            ffe1Char = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
+        } catch (e) {
+            appendLogToTerminal(`❌ [嚴重錯誤]: 在 FFE0 服務中找不到 FFE1 特徵值！`);
+            throw e;
+        }
+
+        // 🚀 雙向收發全部指向同一個 FFE1
+        g_rxCharacteristic = ffe1Char;
+        g_txCharacteristic = ffe1Char;
+
+        isConnected = true;
+        connStatus.innerText = "[已連線]";
+        connStatus.className = "status-btn connected";
+        hardwareId.innerText = `已連接: ${g_device.name || '序列埠設備'}`;
+        cmdInput.disabled = false;
+        cmdInput.placeholder = "請輸入空調控制指令...";
+        sendBtn.disabled = false;
+        menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
+
+        g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
+
+        // 🚀 【關鍵修正 2】：先綁定監聽器，再向晶片發送開啟 Notification 的指令
+        appendLogToTerminal(`[系統]: 正在綁定 FFE1 資料接收接頭...`);
+        g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
+            try {
+                const value = event.target.value;
+                if (!value) return;
+
+                // 🚀 【終極防線】：只要收到任何位元組，不論解碼與換行邏輯如何，強制無條件印出 16 進位原始碼！
+                const rawBytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+                const hexStr = Array.from(rawBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+                
+                // 這行能 100% 證明「網頁到底有沒有收到物理訊號」
+                appendLogToTerminal(`[物理收包 (HEX)]: ${hexStr}`);
+
+                // 進入正常字串轉碼
+                let chunk = decodeDataView(value);
+                handleRawChunk(chunk);
+            } catch (err) {
+                appendLogToTerminal(`❌ [處理收包時崩潰]: ${err.message}`);
+            }
+        });
+
+        appendLogToTerminal(`[系統]: 正在寫入 0x2902 CCCD 以開啟藍牙通知...`);
+        await g_rxCharacteristic.startNotifications();
+        appendLogToTerminal(`[系統]: 🎉 藍牙序列埠通道成功打通！可以開始收發！`);
+
+        // 自動發送 Enter 敲門，要求選單
+        appendLogToTerminal(`[系統]: 正在發送自動敲門訊號...`);
+        await sendBle232RawCmd("");
+
+    } catch (error) {
+        console.error(error);
+        appendLogToTerminal(`\n❌ [連線失敗]: ${error.message}\n`);
+        resetConnectionUi();
     }
-});
-
-await g_rxCharacteristic.startNotifications();
-appendLogToTerminal(`[系統]: 藍牙序列埠通道建立完畢，已準備就緒！`);
-
-// 🚀 自動發送 Enter 敲門，要求空調主板吐出選單
-appendLogToTerminal(`[系統]: 正在嘗試喚醒設備選單...`);
-await sendBle232RawCmd("");
-
-} catch (error) {
-console.error(error);
-if (error.name === 'NotFoundError' || error.message.includes('cancel')) {
-appendLogToTerminal("[系統]: 使用者取消了藍牙搜尋。");
-resetConnectionUi();
-return;
-}
-alert("【藍牙啟動失敗】:\n" + (error.message || error));
-resetConnectionUi();
-}
 }
 
 function resetConnectionUi() {
-isConnected = false;
-connStatus.innerText = "[未連線]";
-connStatus.className = "status-btn";
-hardwareId.innerText = "線材識別：等待網頁藍牙連線...";
+    isConnected = false;
+    connStatus.innerText = "[未連線]";
+    connStatus.className = "status-btn";
+    hardwareId.innerText = "線材識別：等待網頁藍牙連線...";
 }
 
 function onDeviceDisconnected() {
-appendLogToTerminal("\n[警報]: 藍牙連線已從硬體端斷開！\n");
-resetConnectionUi();
-cmdInput.disabled = true;
-sendBtn.disabled = true;
+    appendLogToTerminal("\n⚠️ [警報]: 藍牙連線已斷開！\n");
+    resetConnectionUi();
+    cmdInput.disabled = true;
+    sendBtn.disabled = true;
 }
 
-// 發送端保持純淨 ASCII 流，由 FFE1 負責傳送
+// FFE1 發送
 async function sendBle232RawCmd(cmdText) {
-if (!g_txCharacteristic) return;
-try {
-const fullText = cmdText + "\r";
-const encoder = new TextEncoder();
-const data = encoder.encode(fullText);
+    if (!g_txCharacteristic) return;
+    try {
+        const fullText = cmdText + "\r\n";
+        const encoder = new TextEncoder();
+        const data = encoder.encode(fullText);
 
-if (g_txCharacteristic.properties.writeWithoutResponse) {
-await g_txCharacteristic.writeValueWithoutResponse(data);
-} else {
-await g_txCharacteristic.writeValueWithResponse(data);
-}
-} catch (error) {
-appendLogToTerminal(`[指令發送失敗]: ${error.message}`);
-}
+        if (g_txCharacteristic.properties.writeWithoutResponse) {
+            await g_txCharacteristic.writeValueWithoutResponse(data);
+        } else {
+            await g_txCharacteristic.writeValueWithResponse(data);
+        }
+    } catch (error) {
+        appendLogToTerminal(`❌ [發送失敗]: ${error.message}`);
+    }
 }
 
 function sendManualCmd() {
-const input = document.getElementById('cmd-input');
-const cleanValue = input.value.trim();
-if (cleanValue && isConnected) {
-appendLogToTerminal(`\n[手動發送]: ${cleanValue}\n`);
-sendBle232RawCmd(cleanValue);
-input.value = '';
-}
+    const input = document.getElementById('cmd-input');
+    const cleanValue = input.value.trim();
+    if (cleanValue && isConnected) {
+        appendLogToTerminal(`\n[手動發送]: ${cleanValue}`);
+        sendBle232RawCmd(cleanValue);
+        input.value = '';
+    }
 }
 
 function executeCommand(cmdNum) {
-if (!isConnected) return;
-appendLogToTerminal(`\n[WebApp 選單指令]: ${cmdNum}\n`);
-sendBle232RawCmd(cmdNum);
+    if (!isConnected) return;
+    appendLogToTerminal(`\n[選單指令]: ${cmdNum}`);
+    sendBle232RawCmd(cmdNum);
 }
 
 async function disconnectHardware() {
-if (g_device && g_device.gatt.connected) {
-g_device.gatt.disconnect();
-}
-isConnected = false;
-isMenuParsed = false;
-menuRawLines = [];
-dataBuffer = "";
-resetConnectionUi();
+    if (g_device && g_device.gatt.connected) {
+        g_device.gatt.disconnect();
+    }
+    isConnected = false;
+    isMenuParsed = false;
+    menuRawLines = [];
+    dataBuffer = "";
+    resetConnectionUi();
 
-menuGrid.innerHTML = '<div style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
-appendLogToTerminal("\n[系統]: 已安全斷開藍牙序列埠連線。\n");
+    menuGrid.innerHTML = '<div style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
+    appendLogToTerminal("\n[系統]: 已安全中斷連線。\n");
 }
 
 function clearConsole() {
-terminalBox.innerHTML = '';
-isMenuParsed = false;
-menuRawLines = [];
-if (isConnected) {
-menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，正在重新呼叫選單...</div>';
-sendBle232RawCmd("");
-} else {
-menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
-}
-appendLogToTerminal("[系統]: 畫面與暫存選單已清除並重新偵測。");
+    terminalBox.innerHTML = '';
+    isMenuParsed = false;
+    menuRawLines = [];
+    if (isConnected) {
+        menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，正在重新呼叫選單...</div>';
+        sendBle232RawCmd("");
+    } else {
+        menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
+    }
+    appendLogToTerminal("[系統]: 畫面已清除，重新發送敲門訊號。");
 }
 
-// 🎯 【核心修正 2】：打破「不換行就不顯示」的畫面黑屏 Bug
+// 緩衝處理
 function handleRawChunk(chunk) {
     dataBuffer += chunk;
-    
-    // 選單解析邏輯（依然依賴完整的 \n）
     if (dataBuffer.includes('\n')) {
         let lines = dataBuffer.split('\n');
-        dataBuffer = lines.pop(); // 保留不完整的一行
+        dataBuffer = lines.pop(); 
         lines.forEach(line => {
             processIncomingLine(line);
         });
     } else {
-        // 🚀 關鍵：如果收到不含換行符的「單個字元、片段」，也要立即顯示，防止除錯時畫面看起來沒動靜
         const cleanChunk = chunk.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
         if (cleanChunk) {
-            appendLogToTerminal(`[即時數據流]: ${cleanChunk}`);
+            appendLogToTerminal(`[字串流]: ${cleanChunk}`);
         }
     }
 }
 
 function processIncomingLine(line) {
-    // 過濾 VT100 控制碼
     const cleanLine = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim();
     if (!cleanLine) return;
 
     appendLogToTerminal(cleanLine);
 
-    // 判定是否為功能選單樣式
     const isMenuPattern = /^\(\d+\)|^\d+\./.test(cleanLine);
-
     if (isMenuPattern) {
         if (!isMenuParsed) {
             if (!menuRawLines.includes(cleanLine)) {
@@ -332,45 +324,42 @@ function processIncomingLine(line) {
 }
 
 function renderUiMenu(lines) {
-menuGrid.innerHTML = '';
-lines.forEach(line => {
-const match = line.match(/\d+/);
-const cmdNumber = match ? match[0] : '';
+    menuGrid.innerHTML = '';
+    lines.forEach(line => {
+        const match = line.match(/\d+/);
+        const cmdNumber = match ? match[0] : '';
 
-const btn = document.createElement('button');
-btn.innerText = line;
-btn.onclick = () => {
-executeCommand(cmdNumber);
-};
-menuGrid.appendChild(btn);
-});
+        const btn = document.createElement('button');
+        btn.innerText = line;
+        btn.onclick = () => {
+            executeCommand(cmdNumber);
+        };
+        menuGrid.appendChild(btn);
+    });
 }
 
-// 🎯 【核心修正 3】：將 DataView 強制包裝成 Uint8Array
-// 防止部分 Android 手機 Chrome 內建 WebView 直接對 DataView 解碼時拋出隱形錯誤 (Silent Crash)
 function decodeDataView(dataView) {
     const encodingMode = currentEncoding === 'BIG5' ? 'big5' : 'ascii';
     const decoder = new TextDecoder(encodingMode);
-    
-    // 強制將 DataView 封裝為標準 Uint8Array 陣列再解碼
+    // 強制包裝為 Uint8Array，解決 Android Webview 的解碼相容性問題
     const uint8 = new Uint8Array(dataView.buffer, dataView.byteOffset, dataView.byteLength);
     return decoder.decode(uint8);
 }
 
 function toggleEncoding() {
-currentEncoding = currentEncoding === 'ASCII' ? 'BIG5' : 'ASCII';
-encodeBtn.innerText = currentEncoding;
-appendLogToTerminal(`\n[系統通知]: 已將解碼編碼變更為 ${currentEncoding}\n`);
+    currentEncoding = currentEncoding === 'ASCII' ? 'BIG5' : 'ASCII';
+    encodeBtn.innerText = currentEncoding;
+    appendLogToTerminal(`\n[系統]: 解碼變更為 ${currentEncoding}\n`);
 }
 
 function appendLogToTerminal(text) {
-const p = document.createElement('div');
-p.innerText = text;
-terminalBox.appendChild(p);
-if (terminalBox.children.length > maxLogLines) {
-terminalBox.removeChild(terminalBox.firstChild);
-}
-terminalBox.scrollTop = terminalBox.scrollHeight;
+    const p = document.createElement('div');
+    p.innerText = text;
+    terminalBox.appendChild(p);
+    if (terminalBox.children.length > maxLogLines) {
+        terminalBox.removeChild(terminalBox.firstChild);
+    }
+    terminalBox.scrollTop = terminalBox.scrollHeight;
 }
 </script>
 </body>
