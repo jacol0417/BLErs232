@@ -35,9 +35,31 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 #send-btn { color: #4fc3f7; border-color: #4fc3f7; }
 
 .menu-section { padding: 0 12px; margin-bottom: 8px; }
-.menu-title { color: #aaaaaa; font-size: 14px; margin-bottom: 6px; }
+/* 讓標題與快捷按鈕水平排版 */
+.menu-title-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.menu-title { color: #aaaaaa; font-size: 14px; }
 
-/* 限制選單最大高度，iOS 上強制浮現滾動條 */
+/* 🏠 「回主選單」專屬黃色按鈕樣式 */
+.space-btn { 
+  background-color: #ffd740; 
+  color: #121212; 
+  border: none; 
+  padding: 6px 12px; 
+  border-radius: 4px; 
+  font-size: 12px; 
+  font-weight: bold; 
+  cursor: pointer; 
+  transition: background 0.2s ease;
+}
+.space-btn:active {
+  background-color: #ffb300;
+}
+.space-btn:disabled {
+  background-color: #333333;
+  color: #666666;
+  cursor: not-allowed;
+}
+
 .menu-grid { 
   display: grid; 
   grid-template-columns: repeat(2, 1fr); 
@@ -95,7 +117,11 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 </div>
 
 <div class="menu-section">
+<div class="menu-title-row">
 <div class="menu-title">功能選單 (點擊即發送)</div>
+<!-- 🎯 快捷鍵按鈕：一鍵傳送空格 -->
+<button class="space-btn" id="space-shortcut-btn" onclick="sendSpaceCmd()" disabled>🏠 回主選單 [Space]</button>
+</div>
 <div class="menu-grid" id="ui-menu-grid">
 <div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>
 </div>
@@ -249,18 +275,14 @@ class TerminalView {
         this.parseMenuFromScreen();
     }
 
-    /**
-     * 🎯 核心修改：嚴格限制只有「(數字) 英文」才辨識成按鈕
-     */
     parseMenuFromScreen() {
         let foundLines = [];
         for (let i = 0; i < this.terminalRows; i++) {
             let line = this.screenBuffer[i].join('').trim();
             
-            // 剔除尾端的減號 (-)、等號 (=) 與空白裝飾線
             line = line.replace(/[-_=\s]+$/, '');
             
-            // 🚀 嚴格匹配：必須以 "(數字)" 開頭，且後面一定要有英文單字
+            // 嚴格匹配：必須以 "(數字)" 開頭，且後面一定要有英文單字
             const isMenuPattern = /^\(\d+\)\s+[a-zA-Z]/.test(line);
             if (isMenuPattern) {
                 if (!foundLines.includes(line)) {
@@ -300,6 +322,7 @@ const hardwareId = document.getElementById('hardware-id');
 const cmdInput = document.getElementById('cmd-input');
 const sendBtn = document.getElementById('send-btn');
 const menuPlaceholder = document.getElementById('menu-placeholder');
+const spaceShortcutBtn = document.getElementById('space-shortcut-btn');
 
 const g_terminal = new TerminalView(terminalBox);
 
@@ -377,9 +400,13 @@ async function connectToHardware() {
         connStatus.innerText = "[已連線]";
         connStatus.className = "status-btn connected";
         hardwareId.innerText = `已連接: ${g_device.name || '序列埠設備'}`;
+        
+        // 啟用輸入元件與空格快捷鍵
         cmdInput.disabled = false;
         cmdInput.placeholder = "請輸入空調控制指令...";
         sendBtn.disabled = false;
+        spaceShortcutBtn.disabled = false; 
+        
         menuPlaceholder.innerText = "已確認連線，等待設備回傳數據...";
 
         g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
@@ -423,15 +450,17 @@ function resetConnectionUi() {
     connStatus.innerText = "[未連線]";
     connStatus.className = "status-btn";
     hardwareId.innerText = "線材識別：等待網頁藍牙連線...";
+    cmdInput.disabled = true;
+    sendBtn.disabled = true;
+    spaceShortcutBtn.disabled = true;
 }
 
 function onDeviceDisconnected() {
     appendLogToTerminal("\n⚠️ [警報]: 藍牙連線已斷開！\n");
     resetConnectionUi();
-    cmdInput.disabled = true;
-    sendBtn.disabled = true;
 }
 
+// 核心發送函數（不處理空格，保持指令完整性）
 async function sendBle232RawCmd(cmdText) {
     if (!g_txCharacteristic) return;
     try {
@@ -449,12 +478,34 @@ async function sendBle232RawCmd(cmdText) {
     }
 }
 
+// 🚀 核心升級：專屬發送純空格函數 (無 \r\n，精準模擬鍵盤按下 Space 鍵)
+async function sendSpaceCmd() {
+    if (!isConnected || !g_txCharacteristic) return;
+    appendLogToTerminal(`\n[手動發送]: 發送 [Space] 回到主選單`);
+    try {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(" "); // ASCII 0x20
+        if (g_txCharacteristic.properties.writeWithoutResponse) {
+            await g_txCharacteristic.writeValueWithoutResponse(data);
+        } else {
+            await g_txCharacteristic.writeValueWithResponse(data);
+        }
+    } catch (error) {
+        appendLogToTerminal(`❌ [發送失敗]: ${error.message}`);
+    }
+}
+
+// 🚀 核心優化：保留原始字串，不再強制剔除空格
 function sendManualCmd() {
     const input = document.getElementById('cmd-input');
-    const cleanValue = input.value.trim();
-    if (cleanValue && isConnected) {
-        appendLogToTerminal(`\n[手動發送]: ${cleanValue}`);
-        sendBle232RawCmd(cleanValue);
+    const rawValue = input.value; // 保留原始空白
+    
+    if (isConnected) {
+        // 在本地控制台提供視覺提示：空字串顯示為 [Enter]
+        const displayValue = rawValue === '' ? '[Enter]' : rawValue;
+        appendLogToTerminal(`\n[手動發送]: ${displayValue}`);
+        
+        sendBle232RawCmd(rawValue);
         input.value = '';
     }
 }
@@ -492,14 +543,11 @@ function clearConsole() {
     appendLogToTerminal("[系統]: 畫面已清除，重新發送敲門訊號。");
 }
 
-/**
- * 🎯 提取指令邏輯：因為被過濾後只有數字，所以一律直接提取第一組括號內的數字
- */
 function renderUiMenu(lines) {
     menuGrid.innerHTML = '';
     lines.forEach(line => {
         let cmdNumber = '';
-        const match = line.match(/^\((\d+)\)/); // 提取 (1) 中的 "1" 或 (9) 中的 "9"
+        const match = line.match(/^\((\d+)\)/); // 提取如 "(1)" 中的 "1"
         if (match) {
             cmdNumber = match[1];
         }
