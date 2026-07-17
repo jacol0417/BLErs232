@@ -37,7 +37,7 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 .menu-section { padding: 0 12px; margin-bottom: 8px; }
 .menu-title { color: #aaaaaa; font-size: 14px; margin-bottom: 6px; }
 
-/* 🎯 修正 1 & 2：提高選單最大高度，並強制在 iOS 上浮現滾動條 */
+/* 限制選單最大高度，iOS 上強制浮現滾動條 */
 .menu-grid { 
   display: grid; 
   grid-template-columns: repeat(2, 1fr); 
@@ -250,18 +250,18 @@ class TerminalView {
     }
 
     /**
-     * 🎯 修正 3 & 4：智慧過濾尾部減號裝飾線，並放寬正則以相容 (CR) 等英文選單
+     * 🎯 核心修改：嚴格限制只有「(數字) 英文」才辨識成按鈕
      */
     parseMenuFromScreen() {
         let foundLines = [];
         for (let i = 0; i < this.terminalRows; i++) {
             let line = this.screenBuffer[i].join('').trim();
             
-            // 剔除尾端的減號 (-)、等號 (=) 與空白裝飾
+            // 剔除尾端的減號 (-)、等號 (=) 與空白裝飾線
             line = line.replace(/[-_=\s]+$/, '');
             
-            // 放寬正則：允許括號內有英文和數字，如 (9) 或 (CR) 均能被匹配
-            const isMenuPattern = /^\([a-zA-Z0-9]+\)|^\d+\./.test(line);
+            // 🚀 嚴格匹配：必須以 "(數字)" 開頭，且後面一定要有英文單字
+            const isMenuPattern = /^\(\d+\)\s+[a-zA-Z]/.test(line);
             if (isMenuPattern) {
                 if (!foundLines.includes(line)) {
                     foundLines.push(line);
@@ -493,19 +493,15 @@ function clearConsole() {
 }
 
 /**
- * 🎯 修正 5：智慧提取指令，相容數字與英文（如點擊 (CR) 會提取出 CR）
+ * 🎯 提取指令邏輯：因為被過濾後只有數字，所以一律直接提取第一組括號內的數字
  */
 function renderUiMenu(lines) {
     menuGrid.innerHTML = '';
     lines.forEach(line => {
         let cmdNumber = '';
-        const parenMatch = line.match(/^\(([^)]+)\)/); // 提取括號內的文字，例如 "9"、"CR"
-        const dotMatch = line.match(/^(\d+)\./);       // 提取點號前數字，例如 "1"
-        
-        if (parenMatch) {
-            cmdNumber = parenMatch[1];
-        } else if (dotMatch) {
-            cmdNumber = dotMatch[1];
+        const match = line.match(/^\((\d+)\)/); // 提取 (1) 中的 "1" 或 (9) 中的 "9"
+        if (match) {
+            cmdNumber = match[1];
         }
 
         const btn = document.createElement('button');
