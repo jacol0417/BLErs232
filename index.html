@@ -125,7 +125,7 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 </div>
 
 <div class="console-section">
-<div class="console-title">接收控制台 (80 × 40 虛擬終端)</div>
+<div class="console-title">接收控制台 (80 × 24 虛擬終端)</div>
 <div class="terminal" id="terminal-box"></div>
 </div>
 
@@ -133,8 +133,7 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 class TerminalView {
     constructor(element) {
         this.element = element;
-        // 🚀 升級：將終端機列數擴大至 40 行，防止長選單頂端項目被擠出螢幕
-        this.terminalRows = 40;
+        this.terminalRows = 24;
         this.terminalCols = 80;
         
         this.screenBuffer = Array.from({ length: this.terminalRows }, () => new Array(this.terminalCols).fill(' '));
@@ -143,9 +142,6 @@ class TerminalView {
         
         this.savedCursorRow = 0;
         this.savedCursorCol = 0;
-
-        // 🚀 核心升級：選單項目動態記憶累加器
-        this.menuItemsMap = new Map();
 
         this.ParserState = { NORMAL: 0, ESC: 1, CSI: 2 };
         this.currentState = this.ParserState.NORMAL;
@@ -255,7 +251,7 @@ class TerminalView {
             case 'D':
                 {
                     const n = parseInt(params, 10) || 1;
-                    this.cursorCol = Math.max(0, this.cursorCol - n);
+                    this.cursorCol = Math.max(0, this.cursorCol - 1);
                 }
                 break;
 
@@ -322,42 +318,6 @@ class TerminalView {
         
         this.element.textContent = fullLines.join('\n');
         this.element.scrollTop = this.element.scrollHeight;
-
-        this.parseMenuFromScreen();
-    }
-
-    // 🚀 核心優化：採用「Map 累加器 + 數字大小自動排序」
-    parseMenuFromScreen() {
-        for (let i = 0; i < this.terminalRows; i++) {
-            let line = this.screenBuffer[i].join('').trim();
-            line = line.replace(/[-_=\s]+$/, '');
-            
-            // 匹配格式例如 (1) Status Screen 或 (10) Download Test
-            const match = line.match(/^\((\d+)\)\s+(.+)/);
-            if (match) {
-                const cmdNum = parseInt(match[1], 10);
-                // 存入 Map 累加，就算分包傳輸或捲頁，已出現過的項目也不會丟失
-                this.menuItemsMap.set(cmdNum, line);
-            }
-        }
-        
-        if (this.menuItemsMap.size > 0) {
-            // 🚀 將指令依照數字從小到大精準排序 (1, 2, 3... 10, 11)
-            const sortedKeys = Array.from(this.menuItemsMap.keys()).sort((a, b) => a - b);
-            const sortedLines = sortedKeys.map(k => this.menuItemsMap.get(k));
-
-            const currentButtons = Array.from(menuGrid.querySelectorAll('button')).map(btn => btn.innerText);
-            const isSame = currentButtons.length === sortedLines.length && 
-                           currentButtons.every((val, index) => val === sortedLines[index]);
-            if (!isSame) {
-                renderUiMenu(sortedLines);
-            }
-        }
-    }
-
-    clearMenuCache() {
-        this.menuItemsMap.clear();
-        menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">正在載入選單...</div>';
     }
 
     clearTerminal() {
@@ -370,7 +330,6 @@ class TerminalView {
         this.cursorCol = 0;
         this.currentState = this.ParserState.NORMAL;
         this.element.textContent = '';
-        this.menuItemsMap.clear();
     }
 }
 
@@ -396,6 +355,59 @@ let g_txCharacteristic = null;
 
 const g_asciiDecoder = new TextDecoder('ascii', { fatal: false });
 const g_big5Decoder = new TextDecoder('big5', { fatal: false });
+
+// 🚀 核心升級：原始資料流累積器與解析器
+let g_streamAccumulator = "";
+let g_streamParseTimer = null;
+
+function processIncomingStream(chunkText) {
+    if (g_terminal) {
+        g_terminal.writeText(chunkText);
+    }
+
+    // 將收到的文字持續追加進背景流
+    g_streamAccumulator += chunkText;
+
+    if (g_streamParseTimer) clearTimeout(g_streamParseTimer);
+
+    // 關鍵幀觸發：若出現選單結束關鍵字立刻解析，否則等待 150ms 靜默期
+    if (g_streamAccumulator.includes("Enter Selection") || g_streamAccumulator.includes("Selection;")) {
+        parseMenuFromStream();
+    } else {
+        g_streamParseTimer = setTimeout(() => {
+            parseMenuFromStream();
+        }, 150);
+    }
+}
+
+function parseMenuFromStream() {
+    // 全域正規表示式，精準比對 (數字) 選項名稱
+    const regex = /\((\d+)\)\s+([^\r\n]+)/g;
+    let match;
+    const foundMap = new Map();
+
+    while ((match = regex.exec(g_streamAccumulator)) !== null) {
+        const cmdNum = parseInt(match[1], 10);
+        let label = match[2].trim();
+        // 清理尾端破線或多餘符號
+        label = label.replace(/[-_=\s]+$/, '');
+        if (label) {
+            foundMap.set(cmdNum, `(${cmdNum}) ${label}`);
+        }
+    }
+
+    if (foundMap.size > 0) {
+        // 精準按數字從小到大排序 (1, 2, 3 ... 11)
+        const sortedKeys = Array.from(foundMap.keys()).sort((a, b) => a - b);
+        const sortedLines = sortedKeys.map(k => foundMap.get(k));
+        renderUiMenu(sortedLines);
+    }
+}
+
+function resetStreamBuffer() {
+    g_streamAccumulator = "";
+    if (g_streamParseTimer) clearTimeout(g_streamParseTimer);
+}
 
 async function handleConnectionClick() {
     if (!isConnected) {
@@ -438,7 +450,6 @@ async function connectToHardware() {
             service = await g_gattServer.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
         } catch (e) {
             appendLogToTerminal(`\n❌ [嚴重錯誤]: 找不到 FFE0 服務！該晶片可能修改了預設 UUID。`);
-            appendLogToTerminal(`[系統]: 正在掃描並列出此設備的所有服務以供除錯...`);
             const services = await g_gattServer.getPrimaryServices();
             services.forEach(s => appendLogToTerminal(`   -> 發現服務 UUID: ${s.uuid}`));
             throw new Error("晶片服務 UUID 不符合預設值。");
@@ -476,15 +487,9 @@ async function connectToHardware() {
                 const value = event.target.value;
                 if (!value) return;
 
-                const rawBytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-                const hexStr = Array.from(rawBytes).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-                console.log(`[物理收包 (HEX)]: ${hexStr}`);
-
                 let chunk = decodeDataView(value);
-                
-                if (g_terminal) {
-                    g_terminal.writeText(chunk);
-                }
+                processIncomingStream(chunk);
+
             } catch (err) {
                 console.error(`❌ [處理收包時崩潰]: ${err.message}`);
             }
@@ -500,6 +505,7 @@ async function connectToHardware() {
             g_terminal.clearTerminal();
         }
         resetDecoders();
+        resetStreamBuffer();
 
         appendLogToTerminal(`[系統]: 靜態清空完成，發送自動敲門訊號...`);
         menuPlaceholder.innerText = "已確認連線，等待設備回傳選單...";
@@ -520,6 +526,7 @@ function resetConnectionUi() {
     cmdInput.disabled = true;
     sendBtn.disabled = true;
     spaceShortcutBtn.disabled = true;
+    resetStreamBuffer();
 }
 
 function onDeviceDisconnected() {
@@ -530,10 +537,9 @@ function onDeviceDisconnected() {
 async function sendBle232RawCmd(cmdText) {
     if (!g_txCharacteristic) return;
     try {
-        // 發送非空指令時，清空上一頁的選單記憶快取
-        if (g_terminal && cmdText !== "") {
-            g_terminal.clearMenuCache();
-        }
+        // 發送新指令時，清空累積器準備接收新選單
+        resetStreamBuffer();
+
         const fullText = cmdText + "\r";
         const encoder = new TextEncoder();
         const data = encoder.encode(fullText);
@@ -550,7 +556,7 @@ async function sendBle232RawCmd(cmdText) {
 
 async function sendSpaceCmd() {
     if (!isConnected || !g_txCharacteristic) return;
-    if (g_terminal) g_terminal.clearMenuCache();
+    resetStreamBuffer();
     appendLogToTerminal(`\n[手動發送]: 發送 [Space] 回到主選單`);
     try {
         const encoder = new TextEncoder();
@@ -604,6 +610,8 @@ function clearConsole() {
         g_terminal.clearTerminal();
     }
     resetDecoders();
+    resetStreamBuffer();
+
     if (isConnected) {
         menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，正在重新呼叫選單...</div>';
         sendBle232RawCmd("");
