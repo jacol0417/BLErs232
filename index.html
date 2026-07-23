@@ -125,7 +125,7 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 </div>
 
 <div class="console-section">
-<div class="console-title">接收控制台 (80 × 24 虛擬終端)</div>
+<div class="console-title">接收控制台 (80 × 40 虛擬終端)</div>
 <div class="terminal" id="terminal-box"></div>
 </div>
 
@@ -133,7 +133,8 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 class TerminalView {
     constructor(element) {
         this.element = element;
-        this.terminalRows = 24;
+        // 🚀 升級：將終端機列數擴大至 40 行，防止長選單頂端項目被擠出螢幕
+        this.terminalRows = 40;
         this.terminalCols = 80;
         
         this.screenBuffer = Array.from({ length: this.terminalRows }, () => new Array(this.terminalCols).fill(' '));
@@ -142,6 +143,9 @@ class TerminalView {
         
         this.savedCursorRow = 0;
         this.savedCursorCol = 0;
+
+        // 🚀 核心升級：選單項目動態記憶累加器
+        this.menuItemsMap = new Map();
 
         this.ParserState = { NORMAL: 0, ESC: 1, CSI: 2 };
         this.currentState = this.ParserState.NORMAL;
@@ -322,29 +326,38 @@ class TerminalView {
         this.parseMenuFromScreen();
     }
 
+    // 🚀 核心優化：採用「Map 累加器 + 數字大小自動排序」
     parseMenuFromScreen() {
-        let foundLines = [];
         for (let i = 0; i < this.terminalRows; i++) {
             let line = this.screenBuffer[i].join('').trim();
-            
             line = line.replace(/[-_=\s]+$/, '');
             
-            const isMenuPattern = /^\(\d+\)\s+[a-zA-Z]/.test(line);
-            if (isMenuPattern) {
-                if (!foundLines.includes(line)) {
-                    foundLines.push(line);
-                }
+            // 匹配格式例如 (1) Status Screen 或 (10) Download Test
+            const match = line.match(/^\((\d+)\)\s+(.+)/);
+            if (match) {
+                const cmdNum = parseInt(match[1], 10);
+                // 存入 Map 累加，就算分包傳輸或捲頁，已出現過的項目也不會丟失
+                this.menuItemsMap.set(cmdNum, line);
             }
         }
         
-        if (foundLines.length > 0) {
+        if (this.menuItemsMap.size > 0) {
+            // 🚀 將指令依照數字從小到大精準排序 (1, 2, 3... 10, 11)
+            const sortedKeys = Array.from(this.menuItemsMap.keys()).sort((a, b) => a - b);
+            const sortedLines = sortedKeys.map(k => this.menuItemsMap.get(k));
+
             const currentButtons = Array.from(menuGrid.querySelectorAll('button')).map(btn => btn.innerText);
-            const isSame = currentButtons.length === foundLines.length && 
-                           currentButtons.every((val, index) => val === foundLines[index]);
+            const isSame = currentButtons.length === sortedLines.length && 
+                           currentButtons.every((val, index) => val === sortedLines[index]);
             if (!isSame) {
-                renderUiMenu(foundLines);
+                renderUiMenu(sortedLines);
             }
         }
+    }
+
+    clearMenuCache() {
+        this.menuItemsMap.clear();
+        menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">正在載入選單...</div>';
     }
 
     clearTerminal() {
@@ -357,6 +370,7 @@ class TerminalView {
         this.cursorCol = 0;
         this.currentState = this.ParserState.NORMAL;
         this.element.textContent = '';
+        this.menuItemsMap.clear();
     }
 }
 
@@ -479,17 +493,15 @@ async function connectToHardware() {
         appendLogToTerminal(`[系統]: 正在寫入 0x2902 CCCD 以開啟藍牙通知...`);
         await g_rxCharacteristic.startNotifications();
         
-        // 🚀 核心修正 1：給予 1.5 秒緩衝時間，讓 JDY-33 吐完 +CONNECTED 與電位雜訊
-        appendLogToTerminal(`[系統]: 🎉 藍牙通道開啟！等候連線提示與電位雜訊沉澱 (1.5 秒)...`);
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        appendLogToTerminal(`[系統]: 🎉 藍牙通道開啟！等候連線提示與電位雜訊沉澱 (1.2 秒)...`);
+        await new Promise(resolve => setTimeout(resolve, 1200));
 
-        // 🚀 核心修正 2：發送敲門訊號前，自動清空緩衝區與 Terminal，徹底清除連線雜訊
         if (g_terminal) {
             g_terminal.clearTerminal();
         }
         resetDecoders();
 
-        appendLogToTerminal(`[系統]: 靜態清空完成，準備發送自動敲門訊號...`);
+        appendLogToTerminal(`[系統]: 靜態清空完成，發送自動敲門訊號...`);
         menuPlaceholder.innerText = "已確認連線，等待設備回傳選單...";
         await sendBle232RawCmd("");
 
@@ -518,6 +530,10 @@ function onDeviceDisconnected() {
 async function sendBle232RawCmd(cmdText) {
     if (!g_txCharacteristic) return;
     try {
+        // 發送非空指令時，清空上一頁的選單記憶快取
+        if (g_terminal && cmdText !== "") {
+            g_terminal.clearMenuCache();
+        }
         const fullText = cmdText + "\r";
         const encoder = new TextEncoder();
         const data = encoder.encode(fullText);
@@ -534,6 +550,7 @@ async function sendBle232RawCmd(cmdText) {
 
 async function sendSpaceCmd() {
     if (!isConnected || !g_txCharacteristic) return;
+    if (g_terminal) g_terminal.clearMenuCache();
     appendLogToTerminal(`\n[手動發送]: 發送 [Space] 回到主選單`);
     try {
         const encoder = new TextEncoder();
