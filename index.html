@@ -87,7 +87,7 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 </head>
 <body>
 
-<div class="header">空調系統重置 (狀態機除錯版)</div>
+<div class="header">空調系統重置</div>
 
 <div class="control-panel">
 <div class="hardware-row">
@@ -111,7 +111,7 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 
 <div class="menu-section">
 <div class="menu-title-row">
-<div class="menu-title">功能選單 (點擊即發送)</div>
+<div class="menu-title">功能選單 (點擊即自動發送指令)</div>
 <button class="space-btn" id="space-shortcut-btn" onclick="sendSpaceCmd()" disabled>🏠 回主選單 [Space]</button>
 </div>
 <div class="menu-grid" id="ui-menu-grid">
@@ -515,7 +515,6 @@ function onDeviceDisconnected() {
     resetConnectionUi();
 }
 
-// 🚀 核心優化：支援 appendEnding 參數控制是否附加換行符號
 async function sendBle232RawCmd(cmdText, appendEnding = true) {
     if (!g_txCharacteristic) return;
     try {
@@ -546,7 +545,7 @@ async function sendBle232RawCmd(cmdText, appendEnding = true) {
 async function sendSpaceCmd() {
     if (!isConnected || !g_txCharacteristic) return;
     appendLogToTerminal(`\n[手動發送]: 發送 [Space] 回到主選單`);
-    sendBle232RawCmd(" ", false); // 空格鍵不附加 \r
+    await sendBle232RawCmd(" ", false); // 空格鍵直接發送
 }
 
 function sendManualCmd() {
@@ -562,11 +561,11 @@ function sendManualCmd() {
     }
 }
 
-// 🚀 核心優化：點擊選單發送純數字指令，不自動附加 \r，防止被判定為 (CR) Repeat Menu
-function executeCommand(cmdNum) {
+// 🚀 核心更新：按鈕觸發時自動帶入當前設定的換行符號（預設 \r）發送給 MCU
+async function executeCommand(cmdNum) {
     if (!isConnected) return;
     appendLogToTerminal(`\n[選單指令]: ${cmdNum}`);
-    sendBle232RawCmd(cmdNum, false);
+    await sendBle232RawCmd(cmdNum, true);
 }
 
 async function disconnectHardware() {
@@ -611,8 +610,8 @@ function renderUiMenu(lines) {
 
         const btn = document.createElement('button');
         btn.innerText = line;
-        btn.onclick = () => {
-            executeCommand(cmdNumber);
+        btn.onclick = async () => {
+            await executeCommand(cmdNumber);
         };
         menuGrid.appendChild(btn);
     });
