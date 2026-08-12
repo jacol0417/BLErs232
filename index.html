@@ -353,6 +353,7 @@ const g_big5Decoder = new TextDecoder('big5', { fatal: false });
 
 let g_streamAccumulator = "";
 let g_streamParseTimer = null;
+let g_menuMap = new Map(); // 🚀 關鍵修正：持續性選單 Map，防分包遺失
 
 function processIncomingStream(chunkText) {
     if (g_terminal) {
@@ -372,29 +373,36 @@ function processIncomingStream(chunkText) {
     }
 }
 
+// 🚀 關鍵修正：增量解析與累加機制（過濾 ANSI 控制碼，保留舊有正確選單）
 function parseMenuFromStream() {
+    // 移除 ANSI 控制字元，確保正則表達式不被亂碼干擾
+    const cleanStream = g_streamAccumulator.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '');
     const regex = /\((\d+)\)\s+([^\r\n]+)/g;
     let match;
-    const foundMap = new Map();
+    let updated = false;
 
-    while ((match = regex.exec(g_streamAccumulator)) !== null) {
+    while ((match = regex.exec(cleanStream)) !== null) {
         const cmdNum = parseInt(match[1], 10);
         let label = match[2].trim();
-        label = label.replace(/[-_=\s]+$/, '');
-        if (label) {
-            foundMap.set(cmdNum, `(${cmdNum}) ${label}`);
+        label = label.replace(/[-_=\s]+$/, ''); // 清理尾端雜訊
+        
+        if (label && label.length > 0) {
+            // 只在有新項目或內容改變時才更新
+            if (g_menuMap.get(cmdNum) !== label) {
+                g_menuMap.set(cmdNum, label);
+                updated = true;
+            }
         }
     }
 
-    if (foundMap.size > 0) {
-        const sortedKeys = Array.from(foundMap.keys()).sort((a, b) => a - b);
-        const sortedLines = sortedKeys.map(k => foundMap.get(k));
-        renderUiMenu(sortedLines);
+    if (updated || (g_menuMap.size > 0 && menuGrid.querySelector('#menu-placeholder'))) {
+        renderUiMenuFromMap();
     }
 }
 
 function resetStreamBuffer() {
     g_streamAccumulator = "";
+    g_menuMap.clear(); // 🚀 送出新指令時才真正清空選單池
     if (g_streamParseTimer) clearTimeout(g_streamParseTimer);
 }
 
@@ -542,10 +550,11 @@ async function sendBle232RawCmd(cmdText, appendEnding = true) {
     }
 }
 
+// 🚀 關鍵修正：發送 [Space] 時，帶入預設換行符號 (\r)，讓 MCU 自動響應
 async function sendSpaceCmd() {
     if (!isConnected || !g_txCharacteristic) return;
     appendLogToTerminal(`\n[手動發送]: 發送 [Space] 回到主選單`);
-    await sendBle232RawCmd(" ", false); // 空格鍵直接發送
+    await sendBle232RawCmd(" ", true); 
 }
 
 function sendManualCmd() {
@@ -561,7 +570,6 @@ function sendManualCmd() {
     }
 }
 
-// 🚀 核心更新：按鈕觸發時自動帶入當前設定的換行符號（預設 \r）發送給 MCU
 async function executeCommand(cmdNum) {
     if (!isConnected) return;
     appendLogToTerminal(`\n[選單指令]: ${cmdNum}`);
@@ -599,19 +607,17 @@ function clearConsole() {
     appendLogToTerminal("[系統]: 畫面已清除，重新發送敲門訊號。");
 }
 
-function renderUiMenu(lines) {
+// 🚀 關鍵修正：將 g_menuMap 排序並繪製 UI
+function renderUiMenuFromMap() {
     menuGrid.innerHTML = '';
-    lines.forEach(line => {
-        let cmdNumber = '';
-        const match = line.match(/^\((\d+)\)/); 
-        if (match) {
-            cmdNumber = match[1];
-        }
-
+    const sortedKeys = Array.from(g_menuMap.keys()).sort((a, b) => a - b);
+    
+    sortedKeys.forEach(cmdNum => {
+        const label = g_menuMap.get(cmdNum);
         const btn = document.createElement('button');
-        btn.innerText = line;
+        btn.innerText = `(${cmdNum}) ${label}`;
         btn.onclick = async () => {
-            await executeCommand(cmdNumber);
+            await executeCommand(cmdNum);
         };
         menuGrid.appendChild(btn);
     });
