@@ -23,12 +23,13 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 .status-btn.connected { border-color: #69f0ae; color: #69f0ae; }
 .status-btn.connecting { border-color: #ffd740; color: #ffd740; }
 
-.input-group { display: flex; gap: 8px; align-items: center; justify-content: space-between; margin-top: 14px; }
-.input-group input { flex: 1; min-width: 80px; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px 4px; font-size: 16px; outline: none; }
+.input-group { display: flex; gap: 6px; align-items: center; justify-content: space-between; margin-top: 14px; }
+.input-group input { flex: 1; min-width: 60px; background: transparent; border: none; border-bottom: 2px solid #546e7a; color: #ffffff; padding: 6px 4px; font-size: 15px; outline: none; }
 .input-group input:disabled { border-bottom: 2px solid #37474f; color: #555555; }
 
-.input-group button { background: transparent; border: 1px solid #ffffff; border-radius: 4px; color: #ffffff; font-size: 14px; cursor: pointer; padding: 6px 12px; white-space: nowrap; flex-shrink: 0; font-weight: bold; }
-.input-group button:disabled { color: #555555; border-color: #37474f; cursor: not-allowed; }
+.input-group select, .input-group button { background: transparent; border: 1px solid #ffffff; border-radius: 4px; color: #ffffff; font-size: 13px; cursor: pointer; padding: 6px 8px; white-space: nowrap; flex-shrink: 0; font-weight: bold; }
+.input-group select { background-color: #0d47a1; }
+.input-group button:disabled, .input-group select:disabled { color: #555555; border-color: #37474f; cursor: not-allowed; }
 
 #encode-btn { border-color: #69f0ae; color: #69f0ae; }
 #clear-btn { color: #ffb74d; border-color: #ffb74d; }
@@ -49,14 +50,8 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
   cursor: pointer; 
   transition: background 0.2s ease;
 }
-.space-btn:active {
-  background-color: #ffb300;
-}
-.space-btn:disabled {
-  background-color: #333333;
-  color: #666666;
-  cursor: not-allowed;
-}
+.space-btn:active { background-color: #ffb300; }
+.space-btn:disabled { background-color: #333333; color: #666666; cursor: not-allowed; }
 
 .menu-grid { 
   display: grid; 
@@ -66,14 +61,8 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
   overflow-y: auto; 
   contain: content; 
 }
-.menu-grid::-webkit-scrollbar {
-  -webkit-appearance: none;
-  width: 6px;
-}
-.menu-grid::-webkit-scrollbar-thumb {
-  border-radius: 3px;
-  background-color: rgba(255, 255, 255, 0.3);
-}
+.menu-grid::-webkit-scrollbar { -webkit-appearance: none; width: 6px; }
+.menu-grid::-webkit-scrollbar-thumb { border-radius: 3px; background-color: rgba(255, 255, 255, 0.3); }
 
 .menu-grid button { background-color: #1e1e1e; color: #69f0ae; border: 1px solid #333333; padding: 10px; border-radius: 4px; text-align: left; font-size: 13px; font-family: monospace; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .menu-grid button:active { background-color: #333333; }
@@ -108,6 +97,12 @@ display: flex; flex-direction: column; height: 100vh; overflow: hidden;
 
 <div class="input-group">
 <input type="text" id="cmd-input" placeholder="請先連接硬體..." disabled onkeydown="if(event.key==='Enter') sendManualCmd()">
+<select id="line-ending-select">
+  <option value="NONE">無 (None)</option>
+  <option value="CR" selected>\r (CR)</option>
+  <option value="LF">\n (LF)</option>
+  <option value="CRLF">\r\n (CRLF)</option>
+</select>
 <button id="encode-btn" onclick="toggleEncoding()">ASCII</button>
 <button id="clear-btn" onclick="clearConsole()">清除</button>
 <button id="send-btn" onclick="sendManualCmd()" disabled>傳送</button>
@@ -356,7 +351,6 @@ let g_txCharacteristic = null;
 const g_asciiDecoder = new TextDecoder('ascii', { fatal: false });
 const g_big5Decoder = new TextDecoder('big5', { fatal: false });
 
-// 🚀 核心升級：原始資料流累積器與解析器
 let g_streamAccumulator = "";
 let g_streamParseTimer = null;
 
@@ -365,12 +359,10 @@ function processIncomingStream(chunkText) {
         g_terminal.writeText(chunkText);
     }
 
-    // 將收到的文字持續追加進背景流
     g_streamAccumulator += chunkText;
 
     if (g_streamParseTimer) clearTimeout(g_streamParseTimer);
 
-    // 關鍵幀觸發：若出現選單結束關鍵字立刻解析，否則等待 150ms 靜默期
     if (g_streamAccumulator.includes("Enter Selection") || g_streamAccumulator.includes("Selection;")) {
         parseMenuFromStream();
     } else {
@@ -381,7 +373,6 @@ function processIncomingStream(chunkText) {
 }
 
 function parseMenuFromStream() {
-    // 全域正規表示式，精準比對 (數字) 選項名稱
     const regex = /\((\d+)\)\s+([^\r\n]+)/g;
     let match;
     const foundMap = new Map();
@@ -389,7 +380,6 @@ function parseMenuFromStream() {
     while ((match = regex.exec(g_streamAccumulator)) !== null) {
         const cmdNum = parseInt(match[1], 10);
         let label = match[2].trim();
-        // 清理尾端破線或多餘符號
         label = label.replace(/[-_=\s]+$/, '');
         if (label) {
             foundMap.set(cmdNum, `(${cmdNum}) ${label}`);
@@ -397,7 +387,6 @@ function parseMenuFromStream() {
     }
 
     if (foundMap.size > 0) {
-        // 精準按數字從小到大排序 (1, 2, 3 ... 11)
         const sortedKeys = Array.from(foundMap.keys()).sort((a, b) => a - b);
         const sortedLines = sortedKeys.map(k => foundMap.get(k));
         renderUiMenu(sortedLines);
@@ -449,20 +438,14 @@ async function connectToHardware() {
         try {
             service = await g_gattServer.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
         } catch (e) {
-            appendLogToTerminal(`\n❌ [嚴重錯誤]: 找不到 FFE0 服務！該晶片可能修改了預設 UUID。`);
+            appendLogToTerminal(`\n❌ [嚴重錯誤]: 找不到 FFE0 服務！`);
             const services = await g_gattServer.getPrimaryServices();
             services.forEach(s => appendLogToTerminal(`   -> 發現服務 UUID: ${s.uuid}`));
             throw new Error("晶片服務 UUID 不符合預設值。");
         }
 
         appendLogToTerminal(`[系統]: 正在獲取 FFE1 特徵值...`);
-        let ffe1Char;
-        try {
-            ffe1Char = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
-        } catch (e) {
-            appendLogToTerminal(`❌ [嚴重錯誤]: 在 FFE0 服務中找不到 FFE1 特徵值！`);
-            throw e;
-        }
+        let ffe1Char = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
 
         g_rxCharacteristic = ffe1Char;
         g_txCharacteristic = ffe1Char;
@@ -473,7 +456,7 @@ async function connectToHardware() {
         hardwareId.innerText = `已連接: ${g_device.name || '序列埠設備'}`;
         
         cmdInput.disabled = false;
-        cmdInput.placeholder = "請輸入空調控制指令...";
+        cmdInput.placeholder = "請輸入指令...";
         sendBtn.disabled = false;
         spaceShortcutBtn.disabled = false; 
         
@@ -481,7 +464,6 @@ async function connectToHardware() {
 
         g_device.addEventListener('gattserverdisconnected', onDeviceDisconnected);
 
-        appendLogToTerminal(`[系統]: 正在綁定 FFE1 資料接收接頭...`);
         g_rxCharacteristic.addEventListener('characteristicvaluechanged', (event) => {
             try {
                 const value = event.target.value;
@@ -495,10 +477,9 @@ async function connectToHardware() {
             }
         });
 
-        appendLogToTerminal(`[系統]: 正在寫入 0x2902 CCCD 以開啟藍牙通知...`);
         await g_rxCharacteristic.startNotifications();
         
-        appendLogToTerminal(`[系統]: 🎉 藍牙通道開啟！等候連線提示與電位雜訊沉澱 (1.2 秒)...`);
+        appendLogToTerminal(`[系統]: 🎉 藍牙通道開啟！等待數據穩定 (1.2 秒)...`);
         await new Promise(resolve => setTimeout(resolve, 1200));
 
         if (g_terminal) {
@@ -507,9 +488,9 @@ async function connectToHardware() {
         resetDecoders();
         resetStreamBuffer();
 
-        appendLogToTerminal(`[系統]: 靜態清空完成，發送自動敲門訊號...`);
+        appendLogToTerminal(`[系統]: 清空完成，發送自動敲門訊號...`);
         menuPlaceholder.innerText = "已確認連線，等待設備回傳選單...";
-        await sendBle232RawCmd("");
+        await sendBle232RawCmd("", true);
 
     } catch (error) {
         console.error(error);
@@ -534,13 +515,21 @@ function onDeviceDisconnected() {
     resetConnectionUi();
 }
 
-async function sendBle232RawCmd(cmdText) {
+// 🚀 核心優化：支援 appendEnding 參數控制是否附加換行符號
+async function sendBle232RawCmd(cmdText, appendEnding = true) {
     if (!g_txCharacteristic) return;
     try {
-        // 發送新指令時，清空累積器準備接收新選單
         resetStreamBuffer();
+        menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">指令已送出，等待設備回應...</div>';
 
-        const fullText = cmdText + "\r";
+        let fullText = cmdText;
+        if (appendEnding) {
+            const endingMode = document.getElementById('line-ending-select').value;
+            if (endingMode === 'CR') fullText += "\r";
+            else if (endingMode === 'LF') fullText += "\n";
+            else if (endingMode === 'CRLF') fullText += "\r\n";
+        }
+
         const encoder = new TextEncoder();
         const data = encoder.encode(fullText);
 
@@ -556,19 +545,8 @@ async function sendBle232RawCmd(cmdText) {
 
 async function sendSpaceCmd() {
     if (!isConnected || !g_txCharacteristic) return;
-    resetStreamBuffer();
     appendLogToTerminal(`\n[手動發送]: 發送 [Space] 回到主選單`);
-    try {
-        const encoder = new TextEncoder();
-        const data = encoder.encode(" "); 
-        if (g_txCharacteristic.properties.writeWithoutResponse) {
-            await g_txCharacteristic.writeValueWithoutResponse(data);
-        } else {
-            await g_txCharacteristic.writeValueWithResponse(data);
-        }
-    } catch (error) {
-        appendLogToTerminal(`❌ [發送失敗]: ${error.message}`);
-    }
+    sendBle232RawCmd(" ", false); // 空格鍵不附加 \r
 }
 
 function sendManualCmd() {
@@ -579,15 +557,16 @@ function sendManualCmd() {
         const displayValue = rawValue === '' ? '[Enter]' : rawValue;
         appendLogToTerminal(`\n[手動發送]: ${displayValue}`);
         
-        sendBle232RawCmd(rawValue);
+        sendBle232RawCmd(rawValue, true);
         input.value = '';
     }
 }
 
+// 🚀 核心優化：點擊選單發送純數字指令，不自動附加 \r，防止被判定為 (CR) Repeat Menu
 function executeCommand(cmdNum) {
     if (!isConnected) return;
     appendLogToTerminal(`\n[選單指令]: ${cmdNum}`);
-    sendBle232RawCmd(cmdNum);
+    sendBle232RawCmd(cmdNum, false);
 }
 
 async function disconnectHardware() {
@@ -614,7 +593,7 @@ function clearConsole() {
 
     if (isConnected) {
         menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">畫面已清除，正在重新呼叫選單...</div>';
-        sendBle232RawCmd("");
+        sendBle232RawCmd("", true);
     } else {
         menuGrid.innerHTML = '<div id="menu-placeholder" style="color: #666; grid-column: span 2; font-size: 12px; padding: 10px;">請先建立藍牙連線...</div>';
     }
